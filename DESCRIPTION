@@ -1,0 +1,45 @@
+Package: baeconstrat
+Type: Package
+Title: Macro-to-Balance-Sheet Strategy Analytics for South African Banks
+Version: 0.3.0
+Authors@R: person("Rossouw", "van Jaarsveld", email = "rossouwvanjaarsveld@gmail.com",
+                  role = c("aut", "cre"))
+Description: Ties macroeconomic scenarios to a bank's balance sheet, earnings and
+    return on equity using public South African Reserve Bank data. A two-stage
+    top-down design first links macro variables to the aggregate banking sector
+    (BA100/BA120/BA200/BA700 sector returns, BA900 totals), then links individual
+    banks to the sector (BA900 bank-level balance sheets: growth betas, market
+    shares and regime asymmetries). A fictional bank, No Gut Feelings Bank (NGFB),
+    is drawn from the posterior predictive of a hierarchical model of the large
+    banks and embedded in the sector. Scenario projections feed a net-interest,
+    credit-loss, cost and capital engine, macro sensitivities and a pre-positioning
+    optimiser that recommends balance-sheet moves ahead of a scenario, reported in
+    ROE and net income. Model checks (Clark-West, bounds tests, asymmetric
+    pass-through, convex credit losses, forecast combination) test the Stage 1
+    models against alternatives on the footing they are used on. A monthly
+    layer disaggregates quarterly macro series with the Kalman filter and
+    compares monthly and quarterly satellites, polynomial distributed lags and
+    Bayesian shrinkage on the same outcomes, with simulated dynamic
+    multipliers and local projections. Market-share strategy (where a bank
+    under-participates in each macro regime, and what closing the gap is worth
+    at the margin) and macro-adjusted performance measurement (par and frontier
+    share performance against the large-bank population) complete it.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.1.0)
+Imports:
+    stats,
+    utils
+Suggests:
+    jsonlite,
+    xml2,
+    curl,
+    quadprog,
+    ggplot2,
+    ggrepel,
+    scales,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+RoxygenNote: 7.3.1

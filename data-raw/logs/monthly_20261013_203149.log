@@ -1,0 +1,97 @@
+[2026-10-13 20:31:49] R 4.6.0 on x86_64-w64-mingw32 | wd C:/Users/user pc/Desktop/website-code/BA-econ-strat
+[2026-10-13 20:31:50] SARB API reachable
+[2026-10-13 20:31:50] == BA900 monthly pull, start 2008-01-01 ==
+[2026-10-13 20:31:50]   BA100: 210 periods 2008-01-01 .. 2025-06-01
+[2026-10-13 20:31:55] BA100: 5/210 periods (2008-05-01) | cells ok 5, failed 0 | 0.1 min elapsed, ~3.1 min left
+[2026-10-13 20:31:57] BA100: 10/210 periods (2008-10-01) | cells ok 10, failed 0 | 0.1 min elapsed, ~2.4 min left
+[2026-10-13 20:32:01] BA100: 15/210 periods (2009-03-01) | cells ok 15, failed 0 | 0.2 min elapsed, ~2.4 min left
+[2026-10-13 20:32:06] BA100: 20/210 periods (2009-08-01) | cells ok 20, failed 0 | 0.3 min elapsed, ~2.5 min left
+[2026-10-13 20:32:13] BA100: 25/210 periods (2010-01-01) | cells ok 25, failed 0 | 0.4 min elapsed, ~2.9 min left
+[2026-10-13 20:32:17] BA100: 30/210 periods (2010-06-01) | cells ok 30, failed 0 | 0.4 min elapsed, ~2.7 min left
+[2026-10-13 20:32:22] BA100: 35/210 periods (2010-11-01) | cells ok 35, failed 0 | 0.5 min elapsed, ~2.6 min left
+[2026-10-13 20:32:25] BA100: 40/210 periods (2011-04-01) | cells ok 40, failed 0 | 0.6 min elapsed, ~2.5 min left
+[2026-10-13 20:32:29] BA100: 45/210 periods (2011-09-01) | cells ok 45, failed 0 | 0.6 min elapsed, ~2.4 min left
+[2026-10-13 20:32:34] BA100: 50/210 periods (2012-02-01) | cells ok 50, failed 0 | 0.7 min elapsed, ~2.4 min left
+[2026-10-13 20:32:39] BA100: 55/210 periods (2012-07-01) | cells ok 55, failed 0 | 0.8 min elapsed, ~2.3 min left
+[2026-10-13 20:32:43] BA100: 60/210 periods (2012-12-01) | cells ok 60, failed 0 | 0.9 min elapsed, ~2.2 min left
+[2026-10-13 20:32:50] BA100: 65/210 periods (2013-05-01) | cells ok 65, failed 0 | 1.0 min elapsed, ~2.2 min left
+[2026-10-13 20:32:52] BA100: 70/210 periods (2013-10-01) | cells ok 70, failed 0 | 1.0 min elapsed, ~2.1 min left
+[2026-10-13 20:32:55] BA100: 75/210 periods (2014-03-01) | cells ok 75, failed 0 | 1.1 min elapsed, ~1.9 min left
+[2026-10-13 20:32:59] BA100: 80/210 periods (2014-08-01) | cells ok 80, failed 0 | 1.2 min elapsed, ~1.9 min left
+[2026-10-13 20:33:02] BA100: 85/210 periods (2015-01-01) | cells ok 85, failed 0 | 1.2 min elapsed, ~1.8 min left
+[2026-10-13 20:33:05] BA100: 90/210 periods (2015-06-01) | cells ok 90, failed 0 | 1.2 min elapsed, ~1.7 min left
+[2026-10-13 20:33:09] BA100: 95/210 periods (2015-11-01) | cells ok 95, failed 0 | 1.3 min elapsed, ~1.6 min left
+[2026-10-13 20:33:14] BA100: 100/210 periods (2016-04-01) | cells ok 100, failed 0 | 1.4 min elapsed, ~1.5 min left
+[2026-10-13 20:33:18] BA100: 105/210 periods (2016-09-01) | cells ok 105, failed 0 | 1.5 min elapsed, ~1.5 min left
+[2026-10-13 20:33:24] BA100: 110/210 periods (2017-02-01) | cells ok 110, failed 0 | 1.6 min elapsed, ~1.4 min left
+[2026-10-13 20:33:27] BA100: 115/210 periods (2017-07-01) | cells ok 115, failed 0 | 1.6 min elapsed, ~1.3 min left
+[2026-10-13 20:33:30] BA100: 120/210 periods (2017-12-01) | cells ok 120, failed 0 | 1.7 min elapsed, ~1.3 min left
+[2026-10-13 20:33:35] BA100: 125/210 periods (2018-05-01) | cells ok 125, failed 0 | 1.7 min elapsed, ~1.2 min left
+[2026-10-13 20:33:38] BA100: 130/210 periods (2018-10-01) | cells ok 130, failed 0 | 1.8 min elapsed, ~1.1 min left
+[2026-10-13 20:33:44] BA100: 135/210 periods (2019-03-01) | cells ok 135, failed 0 | 1.9 min elapsed, ~1.1 min left
+[2026-10-13 20:33:55] BA100: 140/210 periods (2019-08-01) | cells ok 140, failed 0 | 2.1 min elapsed, ~1.0 min left
+[2026-10-13 20:33:58] BA100: 145/210 periods (2020-01-01) | cells ok 145, failed 0 | 2.1 min elapsed, ~1.0 min left
+[2026-10-13 20:34:01] BA100: 150/210 periods (2020-06-01) | cells ok 150, failed 0 | 2.2 min elapsed, ~0.9 min left
+[2026-10-13 20:34:06] BA100: 155/210 periods (2020-11-01) | cells ok 155, failed 0 | 2.3 min elapsed, ~0.8 min left
+[2026-10-13 20:34:09] BA100: 160/210 periods (2021-04-01) | cells ok 160, failed 0 | 2.3 min elapsed, ~0.7 min left
+[2026-10-13 20:34:13] BA100: 165/210 periods (2021-09-01) | cells ok 165, failed 0 | 2.4 min elapsed, ~0.6 min left
+[2026-10-13 20:34:20] BA100: 170/210 periods (2022-02-01) | cells ok 170, failed 0 | 2.5 min elapsed, ~0.6 min left
+[2026-10-13 20:34:24] BA100: 175/210 periods (2022-07-01) | cells ok 175, failed 0 | 2.6 min elapsed, ~0.5 min left
+[2026-10-13 20:34:26] BA100: 180/210 periods (2022-12-01) | cells ok 180, failed 0 | 2.6 min elapsed, ~0.4 min left
+[2026-10-13 20:34:32] BA100: 185/210 periods (2023-05-01) | cells ok 185, failed 0 | 2.7 min elapsed, ~0.4 min left
+[2026-10-13 20:34:36] BA100: 190/210 periods (2023-10-01) | cells ok 190, failed 0 | 2.8 min elapsed, ~0.3 min left
+[2026-10-13 20:34:40] BA100: 195/210 periods (2024-03-01) | cells ok 195, failed 0 | 2.8 min elapsed, ~0.2 min left
+[2026-10-13 20:34:46] BA100: 200/210 periods (2024-08-01) | cells ok 200, failed 0 | 2.9 min elapsed, ~0.1 min left
+[2026-10-13 20:34:50] BA100: 205/210 periods (2025-01-01) | cells ok 205, failed 0 | 3.0 min elapsed, ~0.1 min left
+[2026-10-13 20:34:53] BA100: 210/210 periods (2025-06-01) | cells ok 210, failed 0 | 3.1 min elapsed, ~0.0 min left
+[2026-10-13 20:34:54]   BA100m_long.rds: 63048 rows, 210 periods
+[2026-10-13 20:34:54]   BA900: 224 periods 2008-01-31 .. 2026-08-01; 75 already have cached cells
+[2026-10-13 20:36:40] BA900: 5/224 periods (2008-05-31) | cells ok 90, failed 0 | 1.8 min elapsed, ~77.4 min left
+[2026-10-13 20:38:10] BA900: 10/224 periods (2008-10-31) | cells ok 180, failed 0 | 3.3 min elapsed, ~69.9 min left
+[2026-10-13 20:39:27] BA900: 15/224 periods (2009-03-31) | cells ok 270, failed 0 | 4.5 min elapsed, ~63.3 min left
+[2026-10-13 20:41:13] BA900: 20/224 periods (2009-08-01) | cells ok 360, failed 0 | 6.3 min elapsed, ~64.4 min left
+[2026-10-13 20:42:34] BA900: 25/224 periods (2010-01-31) | cells ok 450, failed 0 | 7.7 min elapsed, ~61.0 min left
+[2026-10-13 20:43:50] BA900: 30/224 periods (2010-06-30) | cells ok 540, failed 0 | 8.9 min elapsed, ~57.8 min left
+[2026-10-13 20:45:29] BA900: 35/224 periods (2010-11-30) | cells ok 628, failed 0 | 10.6 min elapsed, ~57.2 min left
+[2026-10-13 20:46:48] BA900: 40/224 periods (2011-04-30) | cells ok 713, failed 0 | 11.9 min elapsed, ~54.7 min left
+[2026-10-13 20:48:09] BA900: 45/224 periods (2011-09-30) | cells ok 798, failed 0 | 13.2 min elapsed, ~52.7 min left
+[2026-10-13 20:49:59] BA900: 50/224 periods (2012-02-29) | cells ok 883, failed 0 | 15.1 min elapsed, ~52.5 min left
+[2026-10-13 20:51:12] BA900: 55/224 periods (2012-07-31) | cells ok 968, failed 0 | 16.3 min elapsed, ~50.1 min left
+[2026-10-13 20:52:19] BA900: 60/224 periods (2012-12-31) | cells ok 1053, failed 0 | 17.4 min elapsed, ~47.6 min left
+[2026-10-13 20:53:52] BA900: 65/224 periods (2013-05-31) | cells ok 1138, failed 0 | 19.0 min elapsed, ~46.4 min left
+[2026-10-13 20:55:03] BA900: 70/224 periods (2013-10-31) | cells ok 1223, failed 0 | 20.1 min elapsed, ~44.3 min left
+[2026-10-13 20:56:25] BA900: 75/224 periods (2014-03-31) | cells ok 1308, failed 0 | 21.5 min elapsed, ~42.7 min left
+[2026-10-13 20:58:03] BA900: 80/224 periods (2014-08-31) | cells ok 1393, failed 0 | 23.1 min elapsed, ~41.7 min left
+[2026-10-13 20:59:13] BA900: 85/224 periods (2015-01-31) | cells ok 1478, failed 0 | 24.3 min elapsed, ~39.8 min left
+[2026-10-13 21:00:21] BA900: 90/224 periods (2015-06-30) | cells ok 1563, failed 0 | 25.4 min elapsed, ~37.9 min left
+[2026-10-13 21:02:01] BA900: 95/224 periods (2015-11-30) | cells ok 1648, failed 0 | 27.1 min elapsed, ~36.8 min left
+[2026-10-13 21:03:14] BA900: 100/224 periods (2016-04-30) | cells ok 1733, failed 0 | 28.3 min elapsed, ~35.1 min left
+[2026-10-13 21:04:24] BA900: 105/224 periods (2016-09-30) | cells ok 1818, failed 0 | 29.5 min elapsed, ~33.4 min left
+[2026-10-13 21:06:01] BA900: 110/224 periods (2017-02-28) | cells ok 1906, failed 0 | 31.1 min elapsed, ~32.2 min left
+[2026-10-13 21:07:15] BA900: 115/224 periods (2017-07-01) | cells ok 1996, failed 0 | 32.4 min elapsed, ~30.7 min left
+[2026-10-13 21:08:30] BA900: 120/224 periods (2017-12-01) | cells ok 2086, failed 0 | 33.6 min elapsed, ~29.1 min left
+[2026-10-13 21:10:08] BA900: 125/224 periods (2018-05-01) | cells ok 2180, failed 0 | 35.2 min elapsed, ~27.9 min left
+[2026-10-13 21:11:19] BA900: 130/224 periods (2018-10-01) | cells ok 2275, failed 0 | 36.4 min elapsed, ~26.3 min left
+[2026-10-13 21:12:30] BA900: 135/224 periods (2019-03-01) | cells ok 2370, failed 0 | 37.6 min elapsed, ~24.8 min left
+[2026-10-13 21:14:08] BA900: 140/224 periods (2019-08-01) | cells ok 2465, failed 0 | 39.2 min elapsed, ~23.5 min left
+[2026-10-13 21:15:24] BA900: 145/224 periods (2020-01-01) | cells ok 2561, failed 0 | 40.5 min elapsed, ~22.1 min left
+[2026-10-13 21:16:38] BA900: 150/224 periods (2020-06-01) | cells ok 2661, failed 0 | 41.7 min elapsed, ~20.6 min left
+[2026-10-13 21:18:11] BA900: 155/224 periods (2020-11-01) | cells ok 2761, failed 0 | 43.3 min elapsed, ~19.3 min left
+[2026-10-13 21:19:21] BA900: 160/224 periods (2021-04-01) | cells ok 2861, failed 0 | 44.4 min elapsed, ~17.8 min left
+[2026-10-13 21:20:35] BA900: 165/224 periods (2021-09-01) | cells ok 2960, failed 0 | 45.7 min elapsed, ~16.3 min left
+[2026-10-13 21:22:11] BA900: 170/224 periods (2022-02-01) | cells ok 3060, failed 0 | 47.3 min elapsed, ~15.0 min left
+[2026-10-13 21:23:23] BA900: 175/224 periods (2022-07-01) | cells ok 3157, failed 0 | 48.5 min elapsed, ~13.6 min left
+[2026-10-13 21:24:28] BA900: 180/224 periods (2022-12-01) | cells ok 3252, failed 0 | 49.6 min elapsed, ~12.1 min left
+[2026-10-13 21:26:02] BA900: 185/224 periods (2023-05-01) | cells ok 3345, failed 0 | 51.1 min elapsed, ~10.8 min left
+[2026-10-13 21:27:12] BA900: 190/224 periods (2023-10-01) | cells ok 3435, failed 0 | 52.3 min elapsed, ~9.4 min left
+[2026-10-13 21:28:17] BA900: 195/224 periods (2024-03-01) | cells ok 3529, failed 0 | 53.4 min elapsed, ~7.9 min left
+[2026-10-13 21:29:39] BA900: 200/224 periods (2024-08-01) | cells ok 3622, failed 0 | 54.8 min elapsed, ~6.6 min left
+[2026-10-13 21:30:35] BA900: 205/224 periods (2025-01-01) | cells ok 3707, failed 0 | 55.7 min elapsed, ~5.2 min left
+[2026-10-13 21:31:40] BA900: 210/224 periods (2025-06-01) | cells ok 3796, failed 0 | 56.8 min elapsed, ~3.8 min left
+[2026-10-13 21:33:06] BA900: 215/224 periods (2025-11-01) | cells ok 3886, failed 0 | 58.2 min elapsed, ~2.4 min left
+[2026-10-13 21:34:08] BA900: 220/224 periods (2026-04-01) | cells ok 3976, failed 0 | 59.2 min elapsed, ~1.1 min left
+[2026-10-13 21:34:54] BA900: 224/224 periods (2026-08-01) | cells ok 4045, failed 0 | 60.0 min elapsed, ~0.0 min left
+[2026-10-13 21:34:55] compacting monthly cells
+[2026-10-13 21:35:29]   BA900m_long.rds: 2305650 rows, 224 periods, 23 institutions
+[2026-10-13 21:35:29] == monthly pull done in 63.6 min ==
+[2026-10-13 21:35:29] log: data-raw/logs/monthly_20261013_203149.log

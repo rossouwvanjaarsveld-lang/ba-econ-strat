@@ -1,0 +1,7 @@
+^data-raw$
+^analysis$
+^report$
+^README\.md$
+^.*\.Rproj$
+^\.Rproj\.user$
+^output$
