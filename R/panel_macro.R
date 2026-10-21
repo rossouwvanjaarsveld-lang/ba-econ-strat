@@ -62,6 +62,20 @@ growth_qq <- function(x) 400 * c(NA, diff(log(x)))
 #' @export
 growth_yy <- function(x) 100 * (log(x) - lag_vec(log(x), 4L))
 
+#' Annual equity-price growth from a preferred and a fallback index
+#'
+#' Growth is computed within each index and the fallback's growth is used
+#' only where the preferred index has none, so a level difference between
+#' the two never shows up as growth.
+#' @param primary,fallback Level series on the same dates.
+#' @param f Growth function (e.g. [growth_yy()]).
+#' @return Numeric vector of growth rates.
+#' @export
+equity_growth <- function(primary, fallback, f) {
+  gp <- f(primary); gf <- f(fallback)
+  ifelse(is.finite(gp), gp, gf)
+}
+
 #' Build the quarterly macro panel
 #'
 #' @param kbp Tidy KBP frame from [read_kbp_cache()].
@@ -99,6 +113,8 @@ build_macro_panel <- function(kbp, fred = NULL, from = "2005-03-31") {
   m$slope  <- m$gov10y - m$jibar3m
   m$d_repo <- c(NA, diff(m$repo))
   m$d4_repo <- m$repo - lag_vec(m$repo, 4L)
+  ## rises and falls of the policy rate over a year (asymmetric volume responses)
+  m$d4_repo_up <- pmax(m$d4_repo, 0); m$d4_repo_dn <- pmin(m$d4_repo, 0)
   m$d_gov10y <- c(NA, diff(m$gov10y))
   ## partial sums of policy-rate increases and decreases since the start of
   ## the panel (repo = repo_0 + repo_pos + repo_neg), for asymmetric
@@ -121,7 +137,14 @@ build_macro_panel <- function(kbp, fred = NULL, from = "2005-03-31") {
   m$hpi_yy <- growth_yy(g("fred_house_px_nominal"))
   m$hpi_real_yy <- growth_yy(g("fred_house_px_real"))
   m$zar_yy <- growth_yy(ifelse(is.finite(g("usdzar")), g("usdzar"), g("fred_usdzar")))
-  m$alsi_yy <- growth_yy(ifelse(is.finite(g("alsi")), g("alsi"), g("fred_share_px")))
+  ## equity prices: the OECD all-share price index (FRED SPASTT01ZAM661N) first.
+  ## The SARB's JLE2001M has level breaks that are not market moves (-42% in
+  ## March 2017, -39% in October 2021, +43% in March 2023, each in a month the
+  ## OECD index moved by less than 5%), which turn into spurious 40-55% swings
+  ## in annual growth;
+  ## it fills only where the OECD index is missing. Growth is taken within
+  ## each series, never across a switch between them.
+  m$alsi_yy <- equity_growth(g("fred_share_px"), g("alsi"), growth_yy)
   m$real_repo <- m$repo - m$cpi_yy
 
   ## labour market

@@ -24,11 +24,19 @@ guard(identical(names(CFG$scenario_weights), names(lib)) && abs(sum(CFG$scenario
       "scenario weights do not match the library")
 
 ## structural hedge on the jump-off book: canonical ratio of the NMD base,
-## 5-year boxcar; the existing book's fixed rate is the average 5y swap proxy
-## (JIBAR + 0.55 x curve slope) over the last 20 quarters
-h20 <- utils::tail(hist[is.finite(hist$slope), ], 20L)
-hedge0 <- list(notional = ngfb_canonical()$hedge_ratio * N$nmd0, tenor_q = 20L,
-               fixed0 = mean(h20$jibar3m + 0.55 * h20$slope))
+## 5-year boxcar. The existing book's fixed rate is the average 5-year JIBAR
+## swap rate over the last 20 quarters: actual swap rates where rbond has
+## them (from 2023Q4), and before that the 5-year government yield less the
+## average swap spread to it (swaps.R). Maturing tranches are reinvested at
+## the scenario's 5-year swap rate: the floating benchmark plus the average
+## 5-year term spread. The book pays the benchmark -- JIBAR to its last
+## fixing on 31 December 2026, then compounded ZARONIA + 16.19 bp, which is
+## what the converted and fallback swaps pay (benchmark.R).
+fx0 <- hedge_fixed0(hist, tenor_q = 20L)
+guard(fx0$n_proxy == 0 && fx0$n_actual >= 8, "the hedge book's fixed rate needs swap data (%d proxy quarters)", fx0$n_proxy)
+hedge0 <- list(notional = ngfb_canonical()$hedge_ratio * N$nmd0, tenor_q = 20L, fixed0 = fx0$fixed0)
+guard(all(c("swap3y", "swap5y", "swap7y", "swap10y") %in% names(scenario_derive(utils::tail(hist, 2), hist))),
+      "the scenarios carry no swap curve")
 eng_args <- list(plug = "wholesale_other", tax = cal$tax, payout = CFG$payout,
                  cet1_share = cal$cet1_share, rwa_other = cal$rwa_other)
 
@@ -90,20 +98,17 @@ model_risk <- do.call(rbind, lapply(names(lib), function(k) data.frame(
   no_ic_credit = no_ic_credit[[k]]$roe, no_ic_credit_ni = no_ic_credit[[k]]$net_income,
   no_ic_credit_clr = no_ic_credit[[k]]$clr)))
 
-## (4) what changed from the previous version of this analysis: the baseline
-##     with the original deposit-cost models (repo level OR its change) and the
-##     intercept correction in the equation, then with the refined deposit
-##     models but the old correction, then the core
-chg <- union(c("c_current", "c_savings", "c_call", "c_fixed_notice", "c_ncd"),
-             eval(formals(stage1_pnl_targets)$asymmetric))
-prev_fit <- do.call(fit_stage1, c(list(P$s1pan, stage1_pnl_targets(character(0), "restricted")[chg],
-                                       controls = c("covid_q2", "covid_q3")), S1$args))
-sats_prev <- S1$sats; sats_prev[chg] <- prev_fit
-proj_eq <- function(sats) project_satellites(sats, P$s1pan, lib$baseline, ic_window = CFG$ic_window,
-                                             ic_families = CFG$ic_families, ic_mode = "equation")
-what_changed <- list(previous = run_one(lib$baseline, proj = proj_eq(sats_prev)),
-                     refined_equation_ic = run_one(lib$baseline, proj = proj_eq(S1$sats)))
-what_changed <- lapply(what_changed, function(z) list(summary = z$summary, proj = z$proj))
+## (4) what changed from the previous version (v3): the swap-rate correction
+##     on its own -- each scenario with the hedge priced off the old proxy
+##     inside the government curve, benchmark + 0.55 x (10-year yield -
+##     benchmark), for the existing book's fixed rate and for reinvestment
+proxy_swaps <- function(s) { f <- float_rate(s); s$swap5y <- f + 0.55 * (s$gov10y - f); s }
+h_proxy <- hedge0; h_proxy$fixed0 <- fx0$proxy
+what_changed <- lapply(names(lib), function(k)
+  run_one(proxy_swaps(lib[[k]]), hedge = h_proxy, proj = res[[k]]$ngfb$proj)$summary)
+names(what_changed) <- names(lib)
+guard(all(vapply(names(lib), function(k) what_changed[[k]]$roe > res[[k]]$ngfb$summary$roe, TRUE)),
+      "the proxy swap curve should overstate the hedge's carry in every scenario")
 
 ## ---- macro sensitivities around the baseline --------------------------------
 n <- CFG$horizon
@@ -172,7 +177,7 @@ no_ic <- list(ngfb = run_one(lib$baseline, proj = p_noic_pnl)$summary,
 
 saveRDS(list(base = base, library = lib, results = res, variants = variants, model_risk = model_risk,
              what_changed = what_changed,
-             clr_convex = clr_convex[["clr"]], hedge0 = hedge0, sensitivities = sens,
+             clr_convex = clr_convex[["clr"]], hedge0 = hedge0, hedge_fixed0 = fx0, sensitivities = sens,
              sensitivities_nohedge = sens_nohedge, attribution = scen_attr, shocks = shocks,
              sector_bs = sec_bal, eng_args = eng_args, no_ic = no_ic), out_path("scenarios.rds"))
 tab <- do.call(rbind, lapply(names(res), function(k) cbind(scenario = k, res[[k]]$ngfb$summary)))

@@ -20,7 +20,7 @@ driver_groups <- function() {
   c(gdp_yy = "activity", coinc_yy = "activity", lead_yy = "activity", gdp_neg = "activity_kink",
     repo = "rates", d_repo = "rates", d4_repo = "rates", real_repo = "rates",
     repo_pos = "rates_up", repo_neg = "rates_down", d_repo_pos = "rates_change_up",
-    d_repo_neg = "rates_change_down",
+    d_repo_neg = "rates_change_down", d4_repo_up = "rates", d4_repo_dn = "rates_dn",
     slope = "curve", gov10y = "curve", d_gov10y = "curve",
     cpi_yy = "prices", unemp = "labour", d4_unemp = "labour",
     hpi_yy = "housing", zar_yy = "fx", alsi_yy = "equity")
@@ -28,12 +28,28 @@ driver_groups <- function() {
 
 #' Stage 1 target registry
 #'
+#' @param asymmetric Volume targets whose response to a year's change in the
+#'   policy rate may differ for rises and falls: the four-quarter change
+#'   `d4_repo` is replaced by its rises `d4_repo_up` and falls `d4_repo_dn`,
+#'   each with the same economic sign (either or both may enter).
+#' @param kink Volume targets that may respond more to GDP growth in a
+#'   contraction: `gdp_neg` (growth below zero) is added as a candidate with
+#'   the sign of GDP growth. The default is what the fixed adoption rule in
+#'   `analysis/08_model_checks.R` selects (card lending since v0.5.0, when the
+#'   corrected equity series moved the verdict from term deposits).
 #' @return Named list; each element has `target`, `label`, `candidates`,
 #'   `signs` and `family` ("volume", "pricing", "credit", "pnl").
 #' @export
-stage1_targets <- function() {
-  v <- function(target, label, signs, family = "volume")
+stage1_targets <- function(asymmetric = character(0), kink = "g_cards") {
+  v <- function(target, label, signs, family = "volume") {
+    if (target %in% asymmetric && "d4_repo" %in% names(signs)) {
+      sg <- signs[["d4_repo"]]
+      signs <- c(signs[names(signs) != "d4_repo"], d4_repo_up = sg, d4_repo_dn = sg)
+    }
+    if (target %in% kink && "gdp_yy" %in% names(signs) && signs[["gdp_yy"]] != 0)
+      signs <- c(signs, gdp_neg = signs[["gdp_yy"]])
     list(target = target, label = label, candidates = names(signs), signs = signs, family = family)
+  }
   list(
     g_mortgages_res = v("g_mortgages_res", "Residential mortgages",
                         c(gdp_yy = 1, hpi_yy = 1, repo = -1, d_repo = -1, d4_repo = -1,

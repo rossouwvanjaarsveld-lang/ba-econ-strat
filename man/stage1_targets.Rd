@@ -4,7 +4,19 @@
 \alias{stage1_targets}
 \title{Stage 1 target registry}
 \usage{
-stage1_targets()
+stage1_targets(asymmetric = character(0), kink = "g_cards")
+}
+\arguments{
+\item{asymmetric}{Volume targets whose response to a year's change in the
+policy rate may differ for rises and falls: the four-quarter change
+`d4_repo` is replaced by its rises `d4_repo_up` and falls `d4_repo_dn`,
+each with the same economic sign (either or both may enter).}
+
+\item{kink}{Volume targets that may respond more to GDP growth in a
+contraction: `gdp_neg` (growth below zero) is added as a candidate with
+the sign of GDP growth. The default is what the fixed adoption rule in
+`analysis/08_model_checks.R` selects (card lending since v0.5.0, when the
+corrected equity series moved the verdict from term deposits).}
 }
 \value{
 Named list; each element has `target`, `label`, `candidates`,

@@ -38,10 +38,11 @@ sign_check <- do.call(rbind, lapply(names(sats_free), function(nm) {
     any(sg != 0 & sign(b) != sg)
   }, TRUE)
   pr <- satellite_panel(sr, P$s1pan); pf <- satellite_panel(sf, P$s1pan)
-  ok <- which(is.finite(pr[[nm]])); o <- ok[ok >= ok[CFG$min_train] & ok <= max(ok) - 1L]
+  ## twelve-quarter simulations along the realised macro path, complete windows
+  ok <- which(is.finite(pr[[nm]])); o <- ok[ok >= ok[CFG$min_train] & ok <= max(ok) - CFG$h_oos]
   act <- data.frame(date = pr$date, value = pr[[nm]])
-  er <- quarterly_errors(oos_forecasts(satellite_designs(sr, pr, 20L), o, 4L), pr$date[o], act)
-  ef <- quarterly_errors(oos_forecasts(satellite_designs(sf, pf, 20L), o, 4L), pf$date[o], act)
+  er <- quarterly_errors(oos_forecasts(satellite_designs(sr, pr, 20L), o, CFG$h_oos), pr$date[o], act)
+  ef <- quarterly_errors(oos_forecasts(satellite_designs(sf, pf, 20L), o, CFG$h_oos), pf$date[o], act)
   data.frame(target = nm, family = sr$family %||% "", n_specs = sr$n_specs,
              rejected_sign = sr$rejected[["sign"]], rejected_t = sr$rejected[["t"]],
              rejected_rho = sr$rejected[["rho"]], sign_valid = sr$n_sign_valid,

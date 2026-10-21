@@ -163,13 +163,16 @@ pdl_search <- function(panel, target, candidates, signs, groups = NULL, max_k = 
 #' @param weights `"bic"` (recomputed on each training window), `"equal"`,
 #'   or a numeric vector of fixed weights.
 #' @param min_train Minimum training observations.
+#' @param ic_k Intercept correction: the mean residual of the last `ic_k`
+#'   training observations of the averaged fit is added to the whole
+#'   simulated path (a level shift, as in the scenarios); 0 = none.
 #' @return Matrix (origins x h) of forecasts.
 #' @export
-oos_forecasts <- function(designs, origins, h, ar = TRUE, weights = "bic", min_train = 28L) {
+oos_forecasts <- function(designs, origins, h, ar = TRUE, weights = "bic", min_train = 28L, ic_k = 0L) {
   Fm <- matrix(NA_real_, length(origins), h)
   for (i in seq_along(origins)) {
     o <- origins[i]
-    pr <- list(); bic <- numeric(0); ww <- numeric(0)
+    pr <- list(); bic <- numeric(0); ww <- numeric(0); icr <- numeric(0)
     for (j in seq_along(designs)) {
       dz <- designs[[j]]
       rows <- which(dz$ok & seq_along(dz$y) <= o)
@@ -179,14 +182,41 @@ oos_forecasts <- function(designs, origins, h, ar = TRUE, weights = "bic", min_t
       if (all(!is.finite(p))) next
       pr[[length(pr) + 1L]] <- p; bic <- c(bic, f$bic)
       ww <- c(ww, if (is.numeric(weights)) weights[j] else 1)
+      if (ic_k > 0L) {
+        lr <- utils::tail(rows, ic_k)
+        icr <- c(icr, mean(dz$y[lr] - drop(dz$X[lr, , drop = FALSE] %*% f$b)))
+      }
     }
     if (!length(pr)) next
     w <- if (identical(weights, "bic")) exp(-0.5 * (bic - min(bic))) else ww
     w <- w / sum(w)
     M <- do.call(rbind, pr)
-    Fm[i, ] <- colSums(M * w, na.rm = FALSE)
+    Fm[i, ] <- colSums(M * w, na.rm = FALSE) + if (ic_k > 0L) sum(w * icr) else 0
   }
   Fm
+}
+
+#' Scenario back-test of a satellite's model average under perfect foresight
+#'
+#' From every expanding-window origin with a complete window, the averaged
+#' specifications are re-estimated on data up to the origin (BIC weights
+#' recomputed) and simulated `h` quarters along the REALISED macro path --
+#' the way a scenario uses the model, with the macro path known. The model
+#' space is the full-sample search's (the same for every model compared).
+#' @param sat A `baeconstrat_satellite`.
+#' @param panel Its panel ([satellite_panel()]).
+#' @param h Horizon (quarters).
+#' @param min_train Minimum training observations before the first origin.
+#' @param ic_k Intercept correction window (0 = none).
+#' @param top Maximum number of averaged specifications.
+#' @return Data frame `origin, h, forecast, actual, error`.
+#' @export
+scenario_backtest <- function(sat, panel, h = 12L, min_train = 28L, ic_k = 0L, top = 20L) {
+  y <- panel[[sat$target]]
+  ok <- which(is.finite(y))
+  org <- ok[ok >= ok[min_train] & ok <= max(ok) - h]
+  Fm <- oos_forecasts(satellite_designs(sat, panel, top), org, h, isTRUE(sat$ar), min_train = min_train, ic_k = ic_k)
+  quarterly_errors(Fm, panel$date[org], data.frame(date = panel$date, value = y))
 }
 
 #' Designs of a satellite's model average (its largest-weight members)

@@ -10,10 +10,13 @@ scenario_derive(s, hist)
 \item{s}{Scenario frame with at least the core variables.}
 
 \item{hist}{Macro history (used for lags at the junction and for the
-JIBAR-repo and T-bill spreads).}
+benchmark spreads over the policy rate).}
 }
 \value{
-`s` with prime, jibar3m, tbill, swap5y, slope, d_repo, d_gov10y,
+`s` with prime, the floating benchmark (`zaronia`, `float3m`:
+  3-month JIBAR to its last fixing on 31 December 2026, then compounded
+  ZARONIA plus the 16.19 bp credit adjustment spread; see benchmark.R),
+  tbill, the swap curve (swap1y..swap10y), slope, d_repo, d_gov10y,
   d_unemp, d4_unemp, real_repo, gdp_qq, coinc_yy (proxy) added.
 }
 \description{

@@ -5,7 +5,8 @@
 #  the macro panel. Scenarios are built as a BASELINE (persistence from the
 #  latest observation towards long-run anchors, optionally with an explicit
 #  policy-rate path) plus DEVIATION paths (ramp to a peak, hold, then decay).
-#  Derived variables (prime, JIBAR, slope, changes, real rate) are recomputed
+#  Derived variables (prime, the 3-month floating benchmark, slope, changes,
+#  real rate) are recomputed
 #  from the core paths by scenario_derive(), so a scenario can never be
 #  internally inconsistent (e.g. a repo shock without a prime shock).
 # =============================================================================
@@ -57,29 +58,35 @@ next_quarters <- function(last, n) {
 #'
 #' @param s Scenario frame with at least the core variables.
 #' @param hist Macro history (used for lags at the junction and for the
-#'   JIBAR-repo and T-bill spreads).
-#' @return `s` with prime, jibar3m, tbill, swap5y, slope, d_repo, d_gov10y,
+#'   benchmark spreads over the policy rate).
+#' @return `s` with prime, the floating benchmark (`zaronia`, `float3m`:
+#'   3-month JIBAR to its last fixing on 31 December 2026, then compounded
+#'   ZARONIA plus the 16.19 bp credit adjustment spread; see benchmark.R),
+#'   tbill, the swap curve (swap1y..swap10y), slope, d_repo, d_gov10y,
 #'   d_unemp, d4_unemp, real_repo, gdp_qq, coinc_yy (proxy) added.
 #' @export
 scenario_derive <- function(s, hist) {
-  h <- utils::tail(hist[is.finite(hist$repo), , drop = FALSE], 8L)
-  jib_spread <- stats::median(h$jibar3m - h$repo, na.rm = TRUE)
-  if (!is.finite(jib_spread)) jib_spread <- 0.35
+  fb <- float_benchmark(s$date, s$repo, benchmark_spreads(hist))
   s$prime   <- s$repo + 3.5
-  s$jibar3m <- s$repo + jib_spread
-  s$jibar   <- s$jibar3m
-  s$tbill   <- s$jibar3m - 0.15
-  s$slope   <- s$gov10y - s$jibar3m
-  s$swap5y  <- s$jibar3m + 0.55 * s$slope           # 5y swap ~ inside the 10y bond curve
+  s$zaronia <- fb$zaronia
+  s$float3m <- fb$float3m
+  s$tbill   <- s$float3m - 0.15
+  s$slope   <- s$gov10y - s$float3m
+  ## swap curve: the benchmark plus the average term spreads in the swap data
+  ## (see swaps.R); without swap data, the old proxy inside the government curve
+  s <- add_swap_curve(s, hist)
   # junction values: quarterly macro series are published with different lags
-  # (unemployment and GDP a quarter behind the policy rate), so the last few
-  # history rows are filled forward before differencing
-  last <- utils::tail(locf_tail(hist, c("repo", "gov10y", "unemp", "cpi_yy", "gdp_yy")), 4L)
+  # (unemployment and GDP a quarter behind the policy rate). The scenario owns
+  # every value that is not yet published at the jump-off (perfect
+  # foresight): the junction quarters come from the scenario itself (see
+  # scenario_junction()), never from carrying the last observation forward
+  last <- utils::tail(pf_history(hist, attr(s, "junction")), 4L)
   cat_prev <- function(v, k = 1L) c(utils::tail(last[[v]], k), s[[v]])
   s$d_repo   <- diff(cat_prev("repo"))
   s$d_repo_pos <- pmax(s$d_repo, 0); s$d_repo_neg <- pmin(s$d_repo, 0)
   r4 <- c(utils::tail(last$repo, 4L), s$repo)
   s$d4_repo  <- r4[-(1:4)] - r4[seq_len(nrow(s))]
+  s$d4_repo_up <- pmax(s$d4_repo, 0); s$d4_repo_dn <- pmin(s$d4_repo, 0)
   s$d_gov10y <- diff(cat_prev("gov10y"))
   s$d_unemp  <- diff(cat_prev("unemp"))
   u4 <- c(utils::tail(last$unemp, 4L), s$unemp)
@@ -116,24 +123,94 @@ scenario_baseline <- function(hist, n = 12L,
                                              zar_yy = 2.0, alsi_yy = 9.0),
                               half_life = 4, repo_path = NULL, jump_off = list(),
                               paths = list()) {
-  last_obs <- function(v) {
-    x <- hist[[v]]; x <- x[is.finite(x)]
-    if (!length(x)) NA_real_ else utils::tail(x, 1)
-  }
   last_date <- max(hist$date[is.finite(hist$repo)])
   dates <- next_quarters(last_date, n)
+  jn <- scenario_junction(hist, last_date, anchors, half_life, jump_off)
   s <- data.frame(date = dates)
   for (v in scenario_core_vars()) {
-    x0 <- jump_off[[v]] %||% last_obs(v)
-    if (!is.finite(x0)) x0 <- anchors[[v]]
+    st <- attr(jn, "start")[[v]]
     hl <- if (is.list(half_life)) (half_life[[v]] %||% 4) else half_life
-    w <- 0.5^(seq_len(n) / hl)
-    s[[v]] <- anchors[[v]] + (x0 - anchors[[v]]) * w
+    ## convergence is timed from the variable's last observation, so a series
+    ## published a quarter late is a quarter further along its path
+    w <- 0.5^((st$k + seq_len(n)) / hl)
+    s[[v]] <- anchors[[v]] + (st$x0 - anchors[[v]]) * w
   }
   if (!is.null(repo_path)) s$repo <- repo_path[seq_len(n)]
   for (v in names(paths)) s[[v]] <- paths[[v]][seq_len(n)]
   attr(s, "jump_off_date") <- last_date
-  scenario_derive(s, hist)
+  attr(s, "junction") <- jn
+  out <- scenario_derive(s, hist)
+  attr(out, "jump_off_date") <- last_date
+  attr(out, "junction") <- jn
+  out
+}
+
+#' Junction quarters of a scenario: macro values not yet published at the jump-off
+#'
+#' Quarterly macro series are published with different lags: at a jump-off
+#' where the policy rate and inflation are known, real GDP, unemployment and
+#' house prices may still be a quarter behind. Under perfect foresight the
+#' scenario specifies every value that is not yet published, so those
+#' quarters are filled by the scenario's own convergence rule (from the last
+#' observation towards the anchor), and no model ever forecasts a macro
+#' variable.
+#' @param hist Quarterly macro history.
+#' @param last_date Jump-off quarter.
+#' @param anchors Named list of long-run values.
+#' @param half_life Convergence half-life (scalar or named list).
+#' @param jump_off Optional overrides of the last observed values.
+#' @return Data frame `date` + core variables (`NA` where published), with
+#'   attribute `start` (per variable: last observed value `x0` and the number
+#'   of junction quarters `k`).
+#' @export
+scenario_junction <- function(hist, last_date, anchors, half_life = 4, jump_off = list()) {
+  core <- scenario_core_vars()
+  qd <- sort(unique(hist$date[hist$date <= last_date]))
+  start <- list(); fill <- list()
+  for (v in core) {
+    x <- hist[[v]]; ok <- is.finite(x) & hist$date <= last_date
+    if (!any(ok)) { start[[v]] <- list(x0 = anchors[[v]], k = 0L); next }
+    lv <- max(hist$date[ok]); x0 <- jump_off[[v]] %||% x[hist$date == lv][1]
+    gap <- qd[qd > lv]
+    hl <- if (is.list(half_life)) (half_life[[v]] %||% 4) else half_life
+    if (length(gap)) fill[[v]] <- data.frame(date = gap, v = anchors[[v]] + (x0 - anchors[[v]]) * 0.5^(seq_along(gap) / hl))
+    start[[v]] <- list(x0 = x0, k = length(gap))
+  }
+  dates <- sort(unique(do.call(c, c(list(as.Date(character(0))), lapply(fill, `[[`, "date")))))
+  out <- data.frame(date = dates)
+  for (v in core) out[[v]] <- if (!is.null(fill[[v]])) fill[[v]]$v[match(dates, fill[[v]]$date)] else rep(NA_real_, length(dates))
+  attr(out, "start") <- start
+  out
+}
+
+#' Macro history completed with a scenario's junction values (perfect foresight)
+#'
+#' Fills the unpublished values of the core macro variables at the jump-off
+#' from the scenario's junction and recomputes the drivers derived from them
+#' (the contraction kink of GDP growth, the one- and four-quarter changes in
+#' unemployment). Published values are never changed.
+#' @param hist Panel with macro columns (quarterly).
+#' @param junction Junction frame from [scenario_junction()] (`NULL` = none).
+#' @return `hist` with the junction values filled in.
+#' @export
+pf_history <- function(hist, junction) {
+  if (is.null(junction) || !nrow(junction)) return(hist)
+  h <- hist[order(hist$date), , drop = FALSE]
+  for (v in intersect(setdiff(names(junction), "date"), names(h))) {
+    i <- match(junction$date, h$date)
+    put <- !is.na(i) & is.finite(junction[[v]])
+    put[put] <- !is.finite(h[[v]][i[put]])
+    h[[v]][i[put]] <- junction[[v]][put]
+  }
+  if ("gdp_yy" %in% names(h)) {
+    h$gdp_neg <- pmin(h$gdp_yy, 0)
+    if ("gdp_qq" %in% names(h)) h$gdp_qq <- ifelse(is.finite(h$gdp_qq), h$gdp_qq, h$gdp_yy)
+  }
+  if ("unemp" %in% names(h)) {
+    if ("d_unemp" %in% names(h)) h$d_unemp <- h$unemp - lag_vec(h$unemp, 1L)
+    if ("d4_unemp" %in% names(h)) h$d4_unemp <- h$unemp - lag_vec(h$unemp, 4L)
+  }
+  h
 }
 
 #' Apply deviation paths to a baseline
@@ -147,7 +224,9 @@ scenario_apply <- function(base, shocks, hist, name, narrative = "") {
   s <- base[, c("date", scenario_core_vars())]
   for (v in names(shocks)) s[[v]] <- s[[v]] + shocks[[v]][seq_len(nrow(s))]
   s$repo <- pmax(s$repo, 0.25)
+  attr(s, "junction") <- attr(base, "junction")
   s <- scenario_derive(s, hist)
+  attr(s, "junction") <- attr(base, "junction"); attr(s, "jump_off_date") <- attr(base, "jump_off_date")
   attr(s, "name") <- name; attr(s, "narrative") <- narrative; attr(s, "shocks") <- shocks
   s
 }

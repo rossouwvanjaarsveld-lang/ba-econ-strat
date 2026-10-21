@@ -138,13 +138,16 @@ deposit_liquidity_factors <- function(dm, date = NULL, factors = basel_liquidity
 #' weighted liability and asset balances. NSFR = sum(ASF) / sum(RSF).
 #' @param balance Numeric balances, aligned with `bs`.
 #' @param bs Balance-sheet definition (see [bs_columns()]).
+#' @param hqla_adj Rand added to the HQLA stock: the difference between the
+#'   market and book value of bonds held in the buffer (Level 1 assets count
+#'   at market value, with no haircut).
 #' @return Named numeric: `lcr`, `nsfr`, `hqla`, `outflows`, `inflows`, `asf`,
 #'   `rsf`.
 #' @export
-liquidity_ratios <- function(balance, bs) {
+liquidity_ratios <- function(balance, bs, hqla_adj = 0) {
   is_a <- bs$side == "asset"; is_l <- bs$side %in% c("deposit", "funding", "liability")
   is_e <- bs$side == "equity"
-  hq <- max(sum(balance * bs$hqla), 0)
+  hq <- max(sum(balance * bs$hqla) + hqla_adj, 0)
   outf <- sum(balance[is_l] * bs$runoff[is_l])
   inf <- min(sum(balance[is_a] * bs$runoff[is_a]), 0.75 * outf)
   asf <- sum(balance[is_l | is_e] * bs$asf[is_l | is_e]); rsf <- sum(balance[is_a] * bs$rsf[is_a])

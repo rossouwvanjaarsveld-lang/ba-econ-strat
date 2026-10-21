@@ -53,6 +53,16 @@ b2last <- b200[b200$period == max(b200$period), c("item_no", "item_desc", "value
 kbp  <- read_kbp_cache(file.path(CFG$raw, "macro"))
 fred <- read_fred_cache(file.path(CFG$raw, "fred"))
 macro <- build_macro_panel(kbp, fred)
+## equity growth comes from the OECD index; the SARB series' level breaks
+## would show up as swings of 40-55% a year where the market barely moved
+guard(all(abs(macro$alsi_yy[macro$date >= CFG$sample_from]) < 45, na.rm = TRUE),
+      "annual equity growth beyond 45%%: check the equity series for level breaks")
+## ZAR swap curve, ZARONIA and generic government yields (rbond.co.za, daily
+## since 2018 for bonds and since September 2023 for swaps); quarterly
+## averages of quarters with at least 20 fixings
+rb <- read_rbond_cache(file.path(CFG$raw, "rbond"))
+guard(!is.null(rb) && sum(is.finite(rb$swap5y)) >= 8, "the swap data are missing: run data-raw/04_pull_swaps.R")
+macro <- add_rbond(macro, rb)
 
 s1pan <- stage1_panel(gp, macro, spnl, end = CFG$date0)
 

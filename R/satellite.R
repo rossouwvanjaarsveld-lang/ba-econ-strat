@@ -13,12 +13,15 @@
 #    2. a specification survives only if every driver carries its a-priori
 #       economic sign (in the short run AND in the long-run multiplier
 #       beta / (1 - rho)) with |t_HAC| >= t_min, and |rho| < rho_max;
-#    3. survivors are ranked by DYNAMIC pseudo-out-of-sample RMSE: from each
+#    3. projections average every survivor with BIC weights (an in-sample
+#       criterion: the relationship that fits best, penalised for size);
+#    4. survivors are also scored by a scenario back-test: from each
 #       expanding-window origin the model is re-estimated and simulated h
-#       quarters ahead conditional on the realised macro path -- exactly how
-#       it is used in a scenario -- and errors are pooled over horizons 1..h;
-#    4. the AR-only model is the benchmark. If no macro specification beats
-#       it, that is reported as a finding, not hidden.
+#       quarters (the scenario horizon) along the REALISED macro path --
+#       perfect foresight, exactly how it is used in a scenario. No macro
+#       variable is ever forecast. The best-scoring specification is
+#       reported as "selected"; the AR-only model, which has no macro
+#       channel, is the reference for whether the macro path helps at all.
 # =============================================================================
 
 .sat_design <- function(panel, target, drivers, lags, ar = TRUE, controls = character(0)) {
@@ -54,7 +57,9 @@
 .sat_oos <- function(dz, ar, h, min_train, origin_step = 1L) {
   idx <- which(dz$ok)
   if (length(idx) < min_train + h) return(list(rmse = NA_real_, err = NULL))
-  origins <- idx[idx >= idx[min_train] & idx <= max(idx) - 1L]
+  ## complete windows only: every origin is scored over the full horizon
+  origins <- idx[idx >= idx[min_train] & idx <= max(idx) - h]
+  if (length(origins) < 5L) origins <- idx[idx >= idx[min_train] & idx <= max(idx) - 1L]
   if (origin_step > 1L) origins <- origins[seq(length(origins), 1L, by = -origin_step)]
   origins <- sort(origins)
   E <- matrix(NA_real_, length(origins), h)

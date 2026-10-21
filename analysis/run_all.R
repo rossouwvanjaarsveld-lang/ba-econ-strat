@@ -8,7 +8,8 @@
 # =============================================================================
 steps <- c("01_build_panels.R", "02_stage1.R", "03_stage2.R", "04_ngfb.R",
            "05_scenarios.R", "06_optimise.R", "07_backtest.R", "08_model_checks.R",
-           "09_monthly.R", "09b_dynamics.R", "10_share_strategy.R", "11_performance.R")
+           "09_monthly.R", "09b_dynamics.R", "10_share_strategy.R", "11_performance.R",
+           "12_audit.R", "13_levers.R", "14_strategy_lab.R", "15_risk_budget.R")
 t0 <- Sys.time()
 for (s in steps) {
   message(sprintf("== %s ==", s))

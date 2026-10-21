@@ -11,7 +11,7 @@ build_macro_panel_monthly(
   to = NULL,
   td_from = "2000-01-01",
   gdp_indicators = c(coinc = "DIFN002A", mfg = "MPR0000B", retail = "MAN5008F"),
-  gdp_model = "chow-lin"
+  gdp_model = "fernandez"
 )
 }
 \arguments{
@@ -27,7 +27,9 @@ build_macro_panel_monthly(
 
 \item{gdp_indicators}{KBP codes of the monthly GDP indicators.}
 
-\item{gdp_model}{Disaggregation model for GDP.}
+\item{gdp_model}{Disaggregation model for GDP (the in-sample AIC choice in
+`analysis/09_monthly.R`: Fernandez, a random walk in the gap between GDP
+and its indicators).}
 }
 \value{
 Data frame by month (`date` = month start) with attribute

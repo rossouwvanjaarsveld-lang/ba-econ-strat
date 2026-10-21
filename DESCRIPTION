@@ -1,7 +1,7 @@
 Package: baeconstrat
 Type: Package
 Title: Macro-to-Balance-Sheet Strategy Analytics for South African Banks
-Version: 0.3.0
+Version: 0.6.0
 Authors@R: person("Rossouw", "van Jaarsveld", email = "rossouwvanjaarsveld@gmail.com",
                   role = c("aut", "cre"))
 Description: Ties macroeconomic scenarios to a bank's balance sheet, earnings and
@@ -23,7 +23,17 @@ Description: Ties macroeconomic scenarios to a bank's balance sheet, earnings an
     multipliers and local projections. Market-share strategy (where a bank
     under-participates in each macro regime, and what closing the gap is worth
     at the margin) and macro-adjusted performance measurement (par and frontier
-    share performance against the large-bank population) complete it.
+    share performance against the large-bank population) complete it. No macro
+    variable is forecast: every model is judged by how well it reproduces
+    balance-sheet outcomes along the realised macro path over the scenario
+    horizon (perfect foresight), asymmetric responses (partial sums, rises and
+    falls of the policy rate, a contraction kink) are adopted by fixed rules,
+    the structural hedge is priced off the actual ZAR swap curve, the floating
+    benchmark moves from JIBAR to compounded ZARONIA plus the fallback spread
+    after JIBAR's last fixing, and an audit, a set of further balance-sheet
+    levers (hedge ratio and tenor, HQLA duration, capital, deposit pricing) and
+    a strategy lab that replays every historical macro episode against static
+    and macro-keyed positioning rules are run through the engine.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.1.0)

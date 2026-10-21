@@ -11,7 +11,19 @@ test_that("baseline converges to anchors and derived variables are consistent", 
   expect_equal(nrow(b), 40L)
   expect_equal(b$prime, b$repo + 3.5)
   expect_equal(tail(b$cpi_yy, 1), 3, tolerance = 1e-3)
-  expect_equal(b$slope, b$gov10y - b$jibar3m)
+  expect_equal(b$slope, b$gov10y - b$float3m)
+})
+test_that("the floating benchmark is JIBAR to its last fixing, then ZARONIA + CAS", {
+  h <- mk_hist()
+  b <- scenario_baseline(h, n = 12)
+  pre <- b$date <= as.Date("2026-12-31")
+  expect_true(any(pre) && any(!pre))
+  ## the toy history has no ZARONIA: the ZARONIA-repo spread falls back to -0.13
+  expect_equal(b$float3m[pre], b$repo[pre] + 0.35)
+  expect_equal(b$float3m[!pre], b$repo[!pre] - 0.13 + 0.1619)
+  expect_equal(b$zaronia, b$repo - 0.13)
+  expect_equal(b$tbill, b$float3m - 0.15)
+  expect_null(b$jibar3m)
 })
 test_that("scenario shocks are applied on top of the baseline", {
   h <- mk_hist(); b <- scenario_baseline(h, n = 12)

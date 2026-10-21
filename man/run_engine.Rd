@@ -17,7 +17,9 @@ run_engine(
   cet1_share = 0.88,
   op_risk_alpha = 0,
   rwa_other = 0,
-  line_rates = NULL
+  line_rates = NULL,
+  overlay = NULL,
+  buffer = NULL
 )
 }
 \arguments{
@@ -30,7 +32,7 @@ absent from `growth` grow with total assets; the `plug` line absorbs the
 funding gap.}
 
 \item{rates}{Data frame: `date`, and reference rates in percent (repo,
-jibar, prime, tbill, gov10y, swap5y).}
+float3m -- or, in older inputs, jibar --, prime, tbill, gov10y, swap5y).}
 
 \item{credit}{Data frame: `date`, `clr` (sector credit-loss ratio, percent
 of average loans, annualised).}
@@ -41,11 +43,28 @@ average assets, annualised).}
 \item{plug}{Name of the line absorbing the funding gap.}
 
 \item{hedge}{List with `notional` (rand), `tenor_q` (quarters) and
-`fixed0` (average fixed rate on the existing book, percent) -- or `NULL`.}
+`fixed0` (average fixed rate on the existing book, percent) -- or `NULL`.
+Optional tranche form: `new_ref` (the `rates` column at which maturing
+tranches are reinvested, e.g. "swap7y"), `new_tenor_q`, an
+`extra_notional` struck now in `extra_tenor_q` quarterly tranches at a
+fixed `extra_rate` (e.g. the market rate at the jump-off) or else at the
+first quarter's `extra_ref` rate (negative notional: pay-fixed swaps that
+offset part of the book; the net maturing notional is what gets
+reinvested),
+and a `target_notional` below the current book, reached by not
+replacing maturing tranches. For strategies that change the hedge
+over time: `target_path`, the net notional to hold after each quarter
+(one value per quarter; each quarter's new tranche closes the gap --
+receive-fixed to add, pay-fixed to reduce -- at that quarter's rate,
+and overrides `target_notional`), and `new_ref` and `new_tenor_q` may be
+vectors with one value per quarter.}
 
 \item{tax}{Corporate tax rate.}
 
-\item{payout}{Dividend payout ratio on positive earnings.}
+\item{payout}{Dividend payout ratio on positive earnings: a number, one
+number per quarter, or a function `f(t, state)` of the quarter and the
+state at the end of the previous quarter (`state$cet1`, the CET1 ratio;
+`state$equity`; `state$date`), for payout rules.}
 
 \item{cet1_share}{CET1 as a share of book equity.}
 
@@ -57,6 +76,28 @@ total assets, calibrated to BA700 less BA200.}
 \item{line_rates}{Optional data frame `date` + one column per line with
 that line's rate (percent p.a.) in each quarter; overrides the pricing
 rule for those lines (used to feed Stage 1 sector yields and costs).}
+
+\item{overlay}{Optional data frame for positions held outside the line
+book (the bond books of treasury.R), one row per quarter: `date`, `nii`
+(net interest income in rand added in the quarter: the books' carry over
+the Treasury bills they replace) and optionally `gains` (realised gains,
+negative for losses, on bonds sold in the quarter, pre-tax: recycled
+from OCI to profit or loss, as IFRS 9 requires for debt held at fair
+value through OCI) and `hqla_mtm` (the books' cumulative mark-to-market,
+realised and unrealised, pre-tax: the amount by which the HQLA stock at
+market value differs from its book value, for the LCR).}
+
+\item{buffer}{Optional list for sizing the liquidity buffer: `release`,
+the share of the HQLA line's balance released in each quarter (one value
+per quarter, a level, not an increment), `line` (default "hqla") and
+`scale`, the line's earning share (the rest is cash and central-bank
+balances). The released balance is earning Treasury bills: it leaves
+the line, the funding plug falls by the same amount (the bills repay
+wholesale funding), and the line's rate is reduced so that the income
+lost is the bills' full yield. Fee income, operating costs and
+non-credit RWA, which the engine scales with total assets, are computed
+on the balance sheet before the release: Treasury bills held or sold do
+not change the cost base or the operational and market risk.}
 }
 \value{
 List: `quarterly` (one row per quarter with NII, NIM, credit losses,

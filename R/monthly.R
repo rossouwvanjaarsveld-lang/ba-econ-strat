@@ -41,6 +41,7 @@ derive_drivers <- function(m, freq = c("month", "quarter"), jib_spread = 0.35, r
   m$slope <- m$gov10y - m$jibar3m
   m$d_repo <- chg(m$repo, k1)
   m$d4_repo <- chg(m$repo, k4)
+  m$d4_repo_up <- pmax(m$d4_repo, 0); m$d4_repo_dn <- pmin(m$d4_repo, 0)
   m$d_gov10y <- chg(m$gov10y, k1)
   m$real_repo <- m$repo - m$cpi_yy
   m$d_unemp <- chg(m$unemp, k1)
@@ -91,7 +92,9 @@ repo_history_early <- function() {
 #' @param to Last month (default: the last month with a policy rate).
 #' @param td_from First quarter used to estimate the disaggregation models.
 #' @param gdp_indicators KBP codes of the monthly GDP indicators.
-#' @param gdp_model Disaggregation model for GDP.
+#' @param gdp_model Disaggregation model for GDP (the in-sample AIC choice in
+#'   `analysis/09_monthly.R`: Fernandez, a random walk in the gap between GDP
+#'   and its indicators).
 #' @return Data frame by month (`date` = month start) with attribute
 #'   `disaggregation` (the fitted models and their diagnostics).
 #' @export
@@ -99,7 +102,7 @@ build_macro_panel_monthly <- function(kbp, fred, from = "2005-01-01", to = NULL,
                                       td_from = "2000-01-01",
                                       gdp_indicators = c(coinc = "DIFN002A", mfg = "MPR0000B",
                                                          retail = "MAN5008F"),
-                                      gdp_model = "chow-lin") {
+                                      gdp_model = "fernandez") {
   from <- month_start(from); td_from <- month_start(td_from)
   ks <- function(code) { s <- kbp[kbp$series == code, c("date", "value")]; s$date <- month_start(s$date); s }
   fs <- function(nm) { s <- fred[fred$name == nm, c("date", "value")]; s$date <- month_start(s$date); s }
@@ -123,13 +126,14 @@ build_macro_panel_monthly <- function(kbp, fred, from = "2005-01-01", to = NULL,
   miss <- !is.finite(m$repo) & m$date %in% eh$date
   m$repo[miss] <- eh$repo[match(m$date[miss], eh$date)]
   m$prime[!is.finite(m$prime)] <- m$repo[!is.finite(m$prime)] + 3.5
-  ## carry the last observation of slow-publishing monthly series forward
-  m <- locf_tail(m, c("jibar3m", "gov10y", "cpi_yy", "usdzar", "alsi", "share_px", "coinc", "lead"))
+  ## no value is carried forward or extrapolated: a series ends at its last
+  ## publication (perfect foresight is supplied by scenarios, not by the panel)
   ## twelve-month growth rates (log, percent)
   g12 <- function(x) 100 * (log(x) - lag_vec(log(x), 12L))
   m$zar_yy <- g12(m$usdzar)
-  alsi_g <- g12(m$alsi); sh_g <- g12(m$share_px)
-  m$alsi_yy <- ifelse(is.finite(alsi_g), alsi_g, sh_g)
+  ## equity prices: the OECD index first; the SARB's JLE2001M has level
+  ## breaks (2017, 2021, 2023) that are not market moves (see panel_macro.R)
+  m$alsi_yy <- equity_growth(m$share_px, m$alsi, g12)
   m$coinc_yy <- g12(m$coinc); m$lead_yy <- g12(m$lead)
 
   ## quarterly series -> monthly (Kalman filter), estimated from td_from
@@ -137,15 +141,23 @@ build_macro_panel_monthly <- function(kbp, fred, from = "2005-01-01", to = NULL,
   ind <- data.frame(date = tdm)
   for (nm in names(gdp_indicators)) { s <- ks(gdp_indicators[[nm]]); ind[[nm]] <- s$value[match(tdm, s$date)] }
   gq <- fs("gdp_real")
-  gfit <- td_gdp_monthly(gq, ind, from = td_from, to = to, model = gdp_model)
+  ## each quarterly series is disaggregated only up to its last published
+  ## quarter: no nowcast, no extrapolation
+  q_end <- function(q) .add_months(.quarter_start(max(q$date[is.finite(q$value)])), 2L)
+  gfit <- td_gdp_monthly(gq, ind, from = td_from, to = min(to, q_end(gq)), model = gdp_model)
   gm <- gfit$monthly
   g12m <- function(d, v) { x <- 100 * (log(v) - lag_vec(log(v), 12L)); x[match(months, d)] }
   m$gdp_m <- gm$gdp_m[match(months, gm$date)]
   m$gdp_yy <- g12m(gm$date, gm$gdp_m)
   m$gdp_3m <- (400 * (log(gm$gdp_m) - lag_vec(log(gm$gdp_m), 3L)))[match(months, gm$date)]
-  un <- td_smooth_monthly(fs("unemp_rate"), from = td_from, to = to, log = FALSE)
+  ## the same quarters without indicators: the smooth monthly path a quarterly
+  ## scenario can supply (what a monthly model would be fed in a scenario)
+  gs <- gdp_monthly_smooth(gq, from = td_from, to = min(to, q_end(gq)))
+  m$gdp_yy_smooth <- g12m(gs$date, gs$gdp_m)
+  un_q <- fs("unemp_rate"); hp_q <- fs("house_px_nominal")
+  un <- td_smooth_monthly(un_q, from = td_from, to = min(to, q_end(un_q)), log = FALSE)
   m$unemp <- un$value[match(months, un$date)]
-  hp <- td_smooth_monthly(fs("house_px_nominal"), from = td_from, to = to, log = TRUE)
+  hp <- td_smooth_monthly(hp_q, from = td_from, to = min(to, q_end(hp_q)), log = TRUE)
   m$hpi <- hp$value[match(months, hp$date)]
   m$hpi_yy <- g12m(hp$date, hp$value)
   m <- derive_drivers(m, "month", jib_spread = stats::median(m$jibar3m - m$repo, na.rm = TRUE))
@@ -157,6 +169,28 @@ build_macro_panel_monthly <- function(kbp, fred, from = "2005-01-01", to = NULL,
     last_quarter = list(gdp = max(gq$date[is.finite(gq$value)]),
                         unemp = max(fs("unemp_rate")$date), hpi = max(fs("house_px_nominal")$date)))
   m
+}
+
+#' Monthly real GDP without indicators (the path a quarterly scenario implies)
+#'
+#' The Litterman disaggregation of log real GDP with an intercept only,
+#' benchmarked so that the three months add up to each quarter: a smooth path
+#' carrying no within-quarter information. It is what a monthly model would
+#' be fed in a scenario, whose GDP path is quarterly.
+#' @param gdp_q Data frame `date`, `value` (quarterly real GDP).
+#' @param from,to First and last month.
+#' @return Data frame `date`, `gdp_m`.
+#' @export
+gdp_monthly_smooth <- function(gdp_q, from, to) {
+  sm <- td_smooth_monthly(data.frame(date = gdp_q$date, value = gdp_q$value / 3), from = from, to = to,
+                          log = TRUE, model = "litterman")
+  q <- gdp_q[is.finite(gdp_q$value), ]; q$qs <- .quarter_start(q$date)
+  qs <- .quarter_start(sm$date)
+  for (k in unique(qs)) {
+    ii <- which(qs == k); v <- q$value[q$qs == k]
+    if (length(ii) == 3L && length(v) == 1L) sm$value[ii] <- sm$value[ii] * v / sum(sm$value[ii])
+  }
+  data.frame(date = sm$date, gdp_m = sm$value)
 }
 
 #' Monthly bank panel from BA900 product lines

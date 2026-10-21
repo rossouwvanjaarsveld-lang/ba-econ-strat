@@ -21,4 +21,10 @@ balances match BA100's product balances closely. Treasury assets and
 wholesale funding carry assumed spreads over their reference rates; the
 wholesale spread is solved by [calibrate_to_sector()] so that the engine's
 sector NII matches BA120.
+
+Floating-rate lines reference "float3m", the 3-month floating benchmark:
+3-month JIBAR over the history and up to its last fixing on 31 December
+2026, then compounded ZARONIA plus the 16.19 bp credit adjustment spread
+(see benchmark.R). Spreads estimated over JIBAR carry over to the
+successor rate because the adjustment spread keeps the two on one basis.
 }

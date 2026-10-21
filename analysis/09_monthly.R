@@ -1,20 +1,25 @@
 # =============================================================================
-#  analysis/09_monthly.R -- monthly frequency: does it beat quarterly, and is
-#                           ARDL still the right tool?
+#  analysis/09_monthly.R -- monthly frequency on the perfect-foresight footing
 #
-#  1. The monthly macro panel: monthly SARB and FRED series, with quarterly
-#     real GDP, unemployment and house prices disaggregated to months by the
-#     Kalman filter; an out-of-sample nowcast test picks the GDP indicators.
-#  2. Monthly sector targets: BA900 (every month) and BA100/BA120 when the
-#     monthly pull (data-raw/03_pull_monthly.R) has been run; otherwise the
-#     SARB's monthly credit statistics (all monetary institutions), which
-#     cover the six lending products, with quarterly versions of the same
-#     series for a like-for-like comparison.
+#  The macro path is taken as known (perfect foresight): no model here
+#  forecasts or nowcasts a macro variable. The question is which frequency
+#  recovers the macro -> balance-sheet relationships better.
+#
+#  1. The monthly macro panel: monthly SARB and FRED series; quarterly real
+#     GDP, unemployment and house prices disaggregated to months by the
+#     Kalman filter up to their last published quarter only. The GDP
+#     indicators are chosen in sample (AIC of the disaggregation model); the
+#     same quarters without indicators give the smooth monthly path a
+#     quarterly scenario implies.
+#  2. Monthly sector targets: BA900 (every month), BA100 and BA120.
 #  3. Monthly satellites: the same registry, signs and search as the
-#     quarterly ones, with lags of 0-12 months.
-#  4. One horse race, scored on the same quarterly outcomes from the same
-#     origins: quarterly and monthly ARDL averages, polynomial distributed
-#     lags, Bayesian shrinkage, and the AR(1).
+#     quarterly ones, lags of 0-12 months, selection on 36-month conditional
+#     simulations; and the same satellites fed only the smooth GDP path.
+#  4. One scenario back-test: from each quarter-end origin every model is
+#     re-estimated and simulated twelve quarters along the REALISED macro
+#     path, scored on the same quarterly outcomes: quarterly and monthly
+#     ARDL averages, polynomial distributed lags, Bayesian shrinkage and,
+#     as the no-macro reference, the AR(1).
 #  (Sign restrictions, lag profiles and dynamic multipliers follow in
 #  09b_dynamics.R.)
 # =============================================================================
@@ -31,34 +36,42 @@ guard(identical(td$gdp$indicators, c("coinc", "mfg", "retail")), "unexpected GDP
 ## the quarterly sums of the monthly GDP path reproduce the published quarters
 gq <- fred[fred$name == "gdp_real", c("date", "value")]
 gm <- td$gdp_monthly
+guard(max(gm$date) == as.Date(sprintf("%s-%02d-01", format(max(gq$date), "%Y"),
+                                      (as.integer(format(max(gq$date), "%m")) - 1L) %/% 3L * 3L + 3L)),
+      "the monthly GDP path runs beyond the last published quarter")
 gm$q <- as.Date(sprintf("%s-%02d-01", format(gm$date, "%Y"), (as.integer(format(gm$date, "%m")) - 1L) %/% 3L * 3L + 1L))
 agg <- stats::aggregate(list(sum = gm$gdp_m, n = gm$gdp_m), list(q = gm$q), function(x) c(sum(x), length(x)))
 agg <- data.frame(q = agg$q, sum = agg$sum[, 1], n = agg$sum[, 2])
 agg <- merge(agg[agg$n == 3, ], data.frame(q = month_start(gq$date), value = gq$value), by = "q")
 guard(max(abs(agg$sum / agg$value - 1)) < 1e-10, "monthly GDP does not add up to the quarters")
-## nowcast test of the indicator choice
+## which indicators? chosen in sample: the disaggregation model's AIC on the
+## published quarters (no out-of-sample nowcast: nothing is forecast)
 ks <- function(code) { s <- kbp[kbp$series == code, c("date", "value")]; s$date <- month_start(s$date); s }
-tdm <- seq(as.Date("2000-01-01"), max(mm$date), by = "month")
+q_last <- max(gq$date[is.finite(gq$value)])
+to_m <- as.Date(sprintf("%s-%02d-01", format(q_last, "%Y"), (as.integer(format(q_last, "%m")) - 1L) %/% 3L * 3L + 3L))
+tdm <- seq(as.Date("2000-01-01"), to_m, by = "month")
 ind <- data.frame(date = tdm)
 codes <- c(coinc = "DIFN002A", mfg = "MPR0000B", retail = "MAN5008F")
-for (nm in names(codes)) { s <- ks(codes[[nm]]); ind[[nm]] <- s$value[match(tdm, s$date)] }
-nc_cfg <- list(list(set = character(0), model = "litterman"), list(set = "coinc", model = "chow-lin"),
-               list(set = c("mfg", "retail"), model = "chow-lin"),
-               list(set = c("coinc", "mfg", "retail"), model = "chow-lin"),
-               list(set = c("coinc", "mfg", "retail"), model = "litterman"))
-nowcast <- do.call(rbind, lapply(nc_cfg, function(cf) {
-  ii <- if (length(cf$set)) ind[, c("date", cf$set)] else NULL
-  e <- td_nowcast_eval(gq, ii, from = "2000-01-01", eval_from = "2012-01-01", model = cf$model)
-  ex <- format(e$quarter, "%Y") != "2020"
-  data.frame(indicators = if (length(cf$set)) paste(cf$set, collapse = " + ") else "none",
-             model = cf$model, n = nrow(e), rmse = sqrt(mean((e$actual - e$nowcast)^2)),
-             rmse_ex2020 = sqrt(mean((e$actual - e$nowcast)[ex]^2)),
-             rmse_ar1 = sqrt(mean((e$actual - e$ar1)^2)), rmse_ar1_ex2020 = sqrt(mean((e$actual - e$ar1)[ex]^2)),
+for (nm in names(codes)) { s0 <- ks(codes[[nm]]); ind[[nm]] <- s0$value[match(tdm, s0$date)] }
+td_cfg <- unlist(lapply(list(character(0), "coinc", c("mfg", "retail"), c("coinc", "mfg", "retail")), function(st)
+  lapply(c("chow-lin", "fernandez", "litterman"), function(md) list(set = st, model = md))), recursive = FALSE)
+qq <- gq[is.finite(gq$value) & gq$date >= as.Date("2000-01-01") & gq$date <= q_last, ]
+qq <- qq[order(qq$date), ]
+td_fit <- do.call(rbind, lapply(td_cfg, function(cf) {
+  X <- if (length(cf$set)) log(as.matrix(ind[, cf$set, drop = FALSE])) else NULL
+  f <- td_disaggregate(log(qq$value / 3), as.Date("2000-01-01"), X = X, nm = 3L * nrow(qq),
+                       conversion = "average", model = cf$model)
+  ## how much of the quarterly variation the aggregated indicators explain
+  ## (growth rates, R^2 of the GLS fit's systematic part)
+  fq <- colMeans(matrix(drop(cbind(1, X) %*% f$beta), 3))
+  r2 <- if (length(cf$set)) stats::cor(diff(fq), diff(log(qq$value / 3)))^2 else 0
+  data.frame(indicators = if (length(cf$set)) paste(cf$set, collapse = " + ") else "none", model = cf$model,
+             quarters = nrow(qq), aic = f$aic, loglik = f$loglik, phi = f$phi, r2_growth = r2,
              stringsAsFactors = FALSE)
 }))
-chosen <- nowcast$indicators == "coinc + mfg + retail" & nowcast$model == "chow-lin"
-guard(nowcast$rmse_ex2020[chosen] == min(nowcast$rmse_ex2020), "the chosen GDP model is not the best nowcaster")
-guard(nowcast$rmse_ex2020[chosen] < nowcast$rmse_ar1_ex2020[chosen], "monthly GDP does not beat the AR(1) nowcast")
+td_fit$d_aic <- td_fit$aic - min(td_fit$aic)
+chosen <- td_fit$indicators == paste(td$gdp$indicators, collapse = " + ") & td_fit$model == td$gdp$model
+guard(sum(chosen) == 1 && td_fit$d_aic[chosen] == 0, "the production GDP disaggregation is not the in-sample (AIC) choice")
 
 ## ---- 2. monthly targets ------------------------------------------------------------
 ## P&L (pricing, credit, fees, costs): BA120 is monthly; BA100 stocks are
@@ -141,15 +154,24 @@ m_args <- list(sample_from = as.Date("2008-07-01"), max_k = CFG$max_k, lags = CF
                h = CFG$m_h_oos, min_train = CFG$m_min_train, origin_step = 3L, oos_top = CFG$m_oos_top)
 sats_m <- do.call(fit_stage1, c(list(pan_m, targets, controls = ctl_m), m_args))
 guard(length(sats_m) == length(targets), "a monthly satellite failed")
+## the same search on the smooth (indicator-free) monthly GDP path -- what a
+## monthly model would be fed in a scenario whose GDP path is quarterly
+uses_gdp <- names(targets)[vapply(targets, function(t) any(c("gdp_yy", "gdp_neg") %in% t$candidates), TRUE)]
+pan_ms <- pan_m
+pan_ms$gdp_yy <- pan_ms$gdp_yy_smooth; pan_ms$gdp_neg <- pmin(pan_ms$gdp_yy, 0)
+sats_ms <- do.call(fit_stage1, c(list(pan_ms, targets[uses_gdp], controls = ctl_m), m_args))
 
-## ---- 4. horse race on common quarterly outcomes -------------------------------------
-H <- 8L
+## ---- 4. scenario back-test on common quarterly outcomes ---------------------------
+## twelve quarters (the scenario horizon) along the realised macro path, from
+## every quarter-end origin with a complete window
+H <- CFG$h_oos
+blk <- function(h) ifelse(h <= 4, "h1_4", ifelse(h <= 8, "h5_8", "h9_12"))
 race <- list(); errs <- list(); errs_own <- list()
 for (nm in names(targets)) {
   sq <- sats_q[[nm]]; sm <- sats_m[[nm]]; tg <- targets[[nm]]
   pq <- satellite_panel(sq, pan_q_of(nm)); pm <- satellite_panel(sm, pan_m)
   okq <- which(is.finite(pq[[nm]]))
-  oq <- okq[okq >= okq[CFG$min_train] & okq <= max(okq) - 1L]
+  oq <- okq[okq >= okq[CFG$min_train] & okq <= max(okq) - H]
   od <- pq$date[oq]
   om <- match(month_start(od), pm$date)
   keep <- is.finite(om); oq <- oq[keep]; om <- om[keep]; od <- od[keep]
@@ -166,12 +188,18 @@ for (nm in names(targets)) {
   ## quarterly definition with day weights; volumes and ratios average
   dw <- if (grepl("^(c_|s_)", nm)) day_weights(pm$date[om], 3L * H) else NULL
   m2q <- function(Fm) months_to_quarters(Fm, dw)
+  ms_fc <- NULL
+  if (nm %in% uses_gdp && !is.null(sats_ms[[nm]])) {
+    pms <- satellite_panel(sats_ms[[nm]], pan_ms)
+    ms_fc <- m2q(oos_forecasts(satellite_designs(sats_ms[[nm]], pms, 20L), om, 3L * H, min_train = CFG$m_min_train))
+  }
   Fq <- list(
     q_ardl = oos_forecasts(satellite_designs(sq, pq, 20L), oq, H),
     q_pdl = if (length(pdl_q$specs)) oos_forecasts(des_pdl(pdl_q, pq, sq$controls), oq, H) else NULL,
     q_shrink = shrinkage_oos(pq, nm, tg$candidates, CFG$lags, oq, H, TRUE, sq$controls),
     q_ar1 = oos_forecasts(ar_q, oq, H),
     m_ardl = m2q(oos_forecasts(satellite_designs(sm, pm, 20L), om, 3L * H, min_train = CFG$m_min_train)),
+    m_ardl_smooth = ms_fc,
     m_pdl = if (length(pdl_m$specs)) m2q(oos_forecasts(des_pdl(pdl_m, pm, sm$controls), om, 3L * H,
                                                        min_train = CFG$m_min_train)) else NULL,
     m_shrink = m2q(shrinkage_oos(pm, nm, tg$candidates, CFG$m_lags, om, 3L * H, TRUE, sm$controls,
@@ -180,9 +208,11 @@ for (nm in names(targets)) {
   Fq <- Filter(Negate(is.null), Fq)
   E <- lapply(names(Fq), function(k) { e <- quarterly_errors(Fq[[k]], od, act); e$model <- k; e })
   E <- do.call(rbind, E)
-  ## common (origin, h) pairs only
+  ## common (origin, h) pairs only -- the smooth-GDP variant exists for the
+  ## GDP-driven targets and is compared on those pairs separately
+  core_models <- setdiff(names(Fq), "m_ardl_smooth")
   key <- paste(E$origin, E$h)
-  common <- names(which(table(key) == length(Fq)))
+  common <- names(which(table(key[E$model %in% core_models]) == length(core_models)))
   E <- E[key %in% common, ]
   E$target <- nm
   errs[[nm]] <- E
@@ -194,50 +224,59 @@ for (nm in names(targets)) {
     aq <- stats::aggregate(list(value = pm[[nm]] * wq), list(date = quarter_end(pm$date)),
                            function(x) if (length(x) == 3L && all(is.finite(x))) sum(x) else NA_real_)
     act_own <- aq[is.finite(aq$value), ]
-    Eo <- do.call(rbind, lapply(grep("^m_", names(Fq), value = TRUE), function(k) {
+    Eo <- do.call(rbind, lapply(intersect(c("m_ardl", "m_pdl", "m_shrink", "m_ar1"), names(Fq)), function(k) {
       e <- quarterly_errors(Fq[[k]], od, act_own); e$model <- k; e }))
     Eo <- Eo[paste(Eo$origin, Eo$h) %in% common, ]
     Eo$target <- nm
     errs_own[[nm]] <- rbind(E[E$model %in% grep("^q_", names(Fq), value = TRUE), ], Eo)
   }
-  r <- stats::aggregate(list(rmse = E$error^2), list(model = E$model, block = ifelse(E$h <= 4, "h1_4", "h5_8")),
-                        function(x) sqrt(mean(x)))
+  r <- stats::aggregate(list(rmse = E$error^2), list(model = E$model, block = blk(E$h)), function(x) sqrt(mean(x)))
+  r_all <- stats::aggregate(list(rmse = E$error^2), list(model = E$model), function(x) sqrt(mean(x)))
+  r <- rbind(r, data.frame(model = r_all$model, block = "h1_12", rmse = r_all$rmse))
   r$target <- nm; r$family <- sq$family %||% "volume"
   r$n_pdl_q <- length(pdl_q$specs); r$n_pdl_m <- length(pdl_m$specs)
   race[[nm]] <- r
 }
 race <- do.call(rbind, race)
 errs <- do.call(rbind, errs)
-## Diebold-Mariano: monthly ARDL against quarterly ARDL, horizons 1-4 averaged per origin
-dm <- do.call(rbind, lapply(names(targets), function(nm) {
-  e <- errs[errs$target == nm & errs$h <= 4, ]
+## volumes: the error in the LEVEL of the book after twelve quarters (percent),
+## the sum of the annualised growth errors over the window divided by four
+lvl <- errs[errs$target %in% names(vol_targets), ]
+lvl12 <- stats::aggregate(list(level_err = lvl$error / 4), list(target = lvl$target, model = lvl$model, origin = lvl$origin),
+                          function(x) if (length(x) == H) sum(x) else NA_real_)
+lvl12 <- lvl12[is.finite(lvl12$level_err), ]
+level_rmse <- stats::aggregate(list(rmse_level12 = lvl12$level_err^2), list(target = lvl12$target, model = lvl12$model),
+                               function(x) sqrt(mean(x)))
+## Diebold-Mariano: monthly ARDL against quarterly ARDL, the twelve-quarter
+## path error per origin (overlapping windows: HAC lag of twelve quarters)
+dm_of <- function(E, mdl_q = "q_ardl", mdl_m = "m_ardl") do.call(rbind, lapply(unique(E$target), function(nm) {
+  e <- E[E$target == nm & E$model %in% c(mdl_q, mdl_m), ]
+  if (!all(c(mdl_q, mdl_m) %in% e$model)) return(NULL)
   a <- stats::aggregate(list(e2 = e$error^2), list(origin = e$origin, model = e$model), mean)
   w <- stats::reshape(a, idvar = "origin", timevar = "model", direction = "wide")
-  d <- dm_test(sqrt(w$e2.q_ardl), sqrt(w$e2.m_ardl), lag = 3L)
-  data.frame(target = nm, dm_stat = d[["stat"]], p_value = d[["p"]], mspe_ratio = d[["mspe_ratio"]],
-             n = nrow(w))
+  w <- w[stats::complete.cases(w), ]
+  if (nrow(w) < 8L) return(NULL)
+  d <- dm_test(sqrt(w[[paste0("e2.", mdl_q)]]), sqrt(w[[paste0("e2.", mdl_m)]]), lag = H)
+  data.frame(target = nm, dm_stat = d[["stat"]], p_value = d[["p"]], mspe_ratio = d[["mspe_ratio"]], n = nrow(w))
 }))
+dm <- dm_of(errs)
+## the smooth-GDP monthly models against the indicator-GDP ones (GDP-driven targets)
+dm_smooth <- dm_of(errs[errs$model %in% c("m_ardl", "m_ardl_smooth"), ], "m_ardl", "m_ardl_smooth")
 ## the same comparison with the monthly models on their own definition (P&L targets)
 errs_own <- do.call(rbind, errs_own)
 race_own <- stats::aggregate(list(rmse = errs_own$error^2),
-                             list(model = errs_own$model, block = ifelse(errs_own$h <= 4, "h1_4", "h5_8"),
-                                  target = errs_own$target), function(x) sqrt(mean(x)))
+                             list(model = errs_own$model, target = errs_own$target), function(x) sqrt(mean(x)))
 race_own$family <- vapply(race_own$target, function(t) S1$sats[[t]]$family %||% "volume", "")
-dm_own <- do.call(rbind, lapply(unique(errs_own$target), function(nm) {
-  e <- errs_own[errs_own$target == nm & errs_own$h <= 4, ]
-  a <- stats::aggregate(list(e2 = e$error^2), list(origin = e$origin, model = e$model), mean)
-  w <- stats::reshape(a, idvar = "origin", timevar = "model", direction = "wide")
-  d <- dm_test(sqrt(w$e2.q_ardl), sqrt(w$e2.m_ardl), lag = 3L)
-  data.frame(target = nm, dm_stat = d[["stat"]], p_value = d[["p"]], mspe_ratio = d[["mspe_ratio"]], n = nrow(w))
-}))
+dm_own <- dm_of(errs_own)
 
 saveRDS(list(vol_source = vol_source, pnl_source = pnl_source, pnl_gap = pnl_gap, def_gap = def_gap,
-             race_own = race_own, dm_own = dm_own, macro_m = mm,
-             disaggregation = td, nowcast = nowcast, panel_m = pan_m,
+             race_own = race_own, dm_own = dm_own, macro_m = mm, td_fit = td_fit, horizon = H,
+             level_rmse = level_rmse, dm_smooth = dm_smooth, sats_ms = sats_ms, uses_gdp = uses_gdp,
+             disaggregation = td, panel_m = pan_m,
              panel_qv = pan_qv, vol_targets = names(vol_targets), sats_m = sats_m,
              sats_qv = if (vol_source == "KBP") sats_qv else NULL, summary_m = stage1_summary(sats_m),
              race = race, errors = errs, dm = dm, m_args = m_args),
         out_path("monthly.rds"))
-rq <- with(race[race$block == "h1_4", ], tapply(rmse, list(target, model), mean))
-ngfb_log("monthly (volumes %s; P&L %s): %d monthly satellites; median RMSE ratio monthly/quarterly ARDL (h1-4) %.2f",
+rq <- with(race[race$block == "h1_12", ], tapply(rmse, list(target, model), mean))
+ngfb_log("monthly (volumes %s; P&L %s): %d monthly satellites; median RMSE ratio monthly/quarterly ARDL over 12 quarters %.2f",
          vol_source, pnl_source, length(sats_m), stats::median(rq[, "m_ardl"] / rq[, "q_ardl"]))

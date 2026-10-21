@@ -1,12 +1,13 @@
 # =============================================================================
 #  analysis/07_backtest.R -- conditional (macro-known) pseudo-out-of-sample test
 #
-#  The question a scenario tool must answer is: IF the macro path were known,
-#  would the satellites have tracked the sector? From two origins -- the eve
-#  of COVID (2019Q4) and the eve of the 2022-23 hiking cycle (2021Q4) -- every
-#  Stage 1 model is re-estimated on data up to the origin only, then projected
-#  eight quarters along the REALISED macro path and compared with outcomes and
-#  with a no-change benchmark. Ratio targets are projected with and without
+#  The question a scenario tool must answer is: IF the macro path were known
+#  (perfect foresight), would the satellites have tracked the sector? From
+#  two origins -- the eve of COVID (2019Q4) and the eve of the 2022-23 hiking
+#  cycle (2021Q4) -- every Stage 1 model is re-estimated on data up to the
+#  origin only, then projected twelve quarters (the scenario horizon) along
+#  the REALISED macro path and compared with outcomes and with a no-change
+#  benchmark. No macro value is forecast or carried forward. Ratio targets are projected with and without
 #  the intercept correction, which is how the correction was chosen, and with
 #  three ways of using the specification search: the BIC-weighted model
 #  average (used in the scenarios), an equal-weighted combination of the five
@@ -17,7 +18,7 @@ P  <- readRDS(out_path("panels.rds"))
 S1 <- readRDS(out_path("stage1.rds"))
 pan <- P$s1pan
 origins <- as.Date(c("2019-12-31", "2021-12-31"))
-H <- 8L
+H <- CFG$h_oos
 
 bt <- list()
 for (k in seq_along(origins)) {
@@ -30,7 +31,9 @@ for (k in seq_along(origins)) {
   fut <- pan[pan$date > o, ][seq_len(H), ]
   drv <- unique(unlist(lapply(sats, function(s) c(s$spec$d, unlist(lapply(s$bma$specs, `[[`, "d")),
                                                   unlist(lapply(s$comb$specs, `[[`, "d"))))))
-  path <- locf_tail(fut, drv)
+  path <- fut
+  guard(all(is.finite(as.matrix(path[, intersect(drv, names(path)), drop = FALSE]))),
+        "a realised macro driver is missing in the back-test window from %s", format(o))
   pr0 <- project_satellites(sats, tr, path, ic_window = 0L)
   pic <- function(mode, method = "bma") project_satellites(sats, tr, path, method = method, ic_window = CFG$ic_window,
                                                            ic_families = CFG$ic_families, ic_mode = mode)

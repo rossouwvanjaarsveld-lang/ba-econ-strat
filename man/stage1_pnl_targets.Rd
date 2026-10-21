@@ -5,7 +5,7 @@
 \title{Stage 1 targets for pricing, credit and other P&L lines}
 \usage{
 stage1_pnl_targets(
-  asymmetric = c("c_savings", "s_cards"),
+  asymmetric = c("c_current", "c_savings", "s_commercial", "s_cards"),
   deposit_dynamics = c("ardl11", "restricted"),
   convex_credit = FALSE
 )

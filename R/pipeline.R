@@ -138,7 +138,7 @@ stage1_panel <- function(gp, macro, spnl, end = NULL) {
 #' @return Target registry in the format of [stage1_targets()]; elements may
 #'   carry their own `groups` (driver -> group map).
 #' @export
-stage1_pnl_targets <- function(asymmetric = c("c_savings", "s_cards"),
+stage1_pnl_targets <- function(asymmetric = c("c_current", "c_savings", "s_commercial", "s_cards"),
                                deposit_dynamics = c("ardl11", "restricted"),
                                convex_credit = FALSE) {
   deposit_dynamics <- match.arg(deposit_dynamics)

@@ -15,6 +15,12 @@
 #' wholesale funding carry assumed spreads over their reference rates; the
 #' wholesale spread is solved by [calibrate_to_sector()] so that the engine's
 #' sector NII matches BA120.
+#'
+#' Floating-rate lines reference "float3m", the 3-month floating benchmark:
+#' 3-month JIBAR over the history and up to its last fixing on 31 December
+#' 2026, then compounded ZARONIA plus the 16.19 bp credit adjustment spread
+#' (see benchmark.R). Spreads estimated over JIBAR carry over to the
+#' successor rate because the adjustment spread keeps the two on one basis.
 #' @return Named list of pricing rules.
 #' @export
 line_pricing_map <- function() {
@@ -24,18 +30,18 @@ line_pricing_map <- function() {
     vaf = list(ref = "prime", spread_target = "s_vaf"),
     cards = list(ref = "prime", spread_target = "s_cards"),
     personal_other = list(ref = "prime", spread_fixed = 8.0),
-    corporate_loans = list(ref = "jibar3m", spread_target = "s_term_loans"),
+    corporate_loans = list(ref = "float3m", spread_target = "s_term_loans"),
     overdrafts = list(ref = "prime", spread_target = "s_overdrafts"),
-    interbank = list(ref = "jibar3m", spread_fixed = -0.10),
+    interbank = list(ref = "float3m", spread_fixed = -0.10),
     reverse_repo = list(ref = "repo", spread_fixed = 0.15),
     hqla = list(ref = "tbill", spread_fixed = 0, scale = 0.80),
-    other_securities = list(ref = "jibar3m", spread_fixed = 0.50),
+    other_securities = list(ref = "float3m", spread_fixed = 0.50),
     beh_operational = list(cost = c(c_current = 0.5, c_call = 0.5)),
     beh_savings = list(cost = c(c_savings = 1)),
     beh_notice = list(cost = c(c_call = 1)),
     beh_term = list(cost = c(c_fixed_notice = 0.8, c_ncd = 0.2)),
     repo_funding = list(ref = "repo", spread_fixed = 0.10),
-    wholesale_other = list(ref = "jibar3m", spread_fixed = 1.00))
+    wholesale_other = list(ref = "float3m", spread_fixed = 1.00))
   p
 }
 
@@ -52,7 +58,8 @@ line_rate <- function(rule, row) {
     return(v)
   }
   sp <- if (!is.null(rule$spread_target)) row[[rule$spread_target]] else (rule$spread_fixed %||% 0)
-  row[[rule$ref]] * (rule$scale %||% 1) + sp
+  ref <- if (identical(rule$ref, "float3m")) float_rate(row) else row[[rule$ref]]
+  ref * (rule$scale %||% 1) + sp
 }
 
 #' Default line characteristics: risk weights, loss multipliers, liquidity factors
@@ -146,7 +153,10 @@ project_satellites <- function(sats, hist, scen, method = "bma", ic_window = 0L,
   drivers <- unique(unlist(lapply(sats, function(s) c(s$spec$d, unlist(lapply(s$bma$specs, `[[`, "d"))))))
   start <- min(scen$date)
   hh <- hist[hist$date < start, , drop = FALSE]
-  hh <- locf_tail(hh, drivers)
+  ## perfect foresight: macro values not yet published at the jump-off come
+  ## from the scenario (its junction), never from a forecast or from
+  ## carrying the last observation forward
+  hh <- pf_history(hh, attr(scen, "junction"))
   out <- data.frame(date = scen$date)
   now <- as.Date(character(0))
   for (nm in names(sats)) {
@@ -157,6 +167,10 @@ project_satellites <- function(sats, hist, scen, method = "bma", ic_window = 0L,
     for (m in setdiff(names(bridge), names(sc))) sc[[m]] <- NA_real_
     for (m in setdiff(names(sc), names(bridge))) bridge[[m]] <- NA_real_
     path <- rbind(bridge[, names(sc)], sc)
+    used <- intersect(unique(c(s$spec$d, unlist(lapply(s$bma$specs, `[[`, "d")))), names(path))
+    if (nrow(bridge) && any(!is.finite(as.matrix(bridge[, used, drop = FALSE]))))
+      stop("project_satellites: a macro driver of ", tg, " is missing at the jump-off; ",
+           "the scenario's junction must supply it")
     h <- hh[hh$date <= last_y, , drop = FALSE]
     icw <- if ((s$family %||% "") %in% ic_families) ic_window else 0L
     p <- satellite_project(s, h, path, method = method, ic_window = icw, ic_mode = ic_mode)
@@ -214,9 +228,13 @@ engine_inputs <- function(proj, scen, regimes, share_params = NULL, mean_g = NUL
     }
     growth[[ln]] <- exp((g + ds) / 400)
   }
-  rates <- data.frame(date = scen$date, repo = scen$repo, jibar = scen$jibar3m,
-                      jibar3m = scen$jibar3m, prime = scen$prime, tbill = scen$tbill,
+  ## the 3-month floating benchmark: JIBAR to its last fixing, then
+  ## compounded ZARONIA + the credit adjustment spread (benchmark.R)
+  rates <- data.frame(date = scen$date, repo = scen$repo, float3m = float_rate(scen),
+                      zaronia = scen$zaronia %||% NA_real_, prime = scen$prime, tbill = scen$tbill,
                       gov10y = scen$gov10y, swap5y = scen$swap5y)
+  ## the rest of the swap curve, where the scenario carries it (swaps.R)
+  for (k in setdiff(intersect(c(names(swap_tenors()), "swap7y"), names(scen)), "swap5y")) rates[[k]] <- scen[[k]]
   line_rates <- data.frame(date = scen$date)
   rows <- cbind(d[, setdiff(names(d), names(rates)), drop = FALSE], rates)
   for (ln in names(pricing))

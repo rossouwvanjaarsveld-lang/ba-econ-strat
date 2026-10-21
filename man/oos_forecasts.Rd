@@ -4,7 +4,15 @@
 \alias{oos_forecasts}
 \title{Model-averaged dynamic forecasts from expanding-window origins}
 \usage{
-oos_forecasts(designs, origins, h, ar = TRUE, weights = "bic", min_train = 28L)
+oos_forecasts(
+  designs,
+  origins,
+  h,
+  ar = TRUE,
+  weights = "bic",
+  min_train = 28L,
+  ic_k = 0L
+)
 }
 \arguments{
 \item{designs}{List of designs (see [ardl_design()], [pdl_design()]), all
@@ -20,6 +28,10 @@ aligned with the same panel rows.}
 or a numeric vector of fixed weights.}
 
 \item{min_train}{Minimum training observations.}
+
+\item{ic_k}{Intercept correction: the mean residual of the last `ic_k`
+training observations of the averaged fit is added to the whole
+simulated path (a level shift, as in the scenarios); 0 = none.}
 }
 \value{
 Matrix (origins x h) of forecasts.

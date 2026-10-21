@@ -14,7 +14,12 @@ CFG <- list(
   seed       = ngfb_canonical()$seed,    # 20260622
   lags       = 0:4,                      # admissible driver lags (quarters)
   max_k      = 3L,                       # max macro drivers per satellite
-  h_oos      = 4L,                       # dynamic OOS horizon for selection
+  ## every model is judged as a scenario uses it: re-estimated on data up
+  ## to an origin and simulated along the REALISED macro path (perfect
+  ## foresight -- no macro variable is ever forecast) over the scenario
+  ## horizon of twelve quarters, so that the test rewards the macro
+  ## relationship rather than short-run persistence
+  h_oos      = 12L,                      # conditional-simulation horizon (quarters)
   min_train  = 28L,                      # first OOS origin after 7 years
   ic_window  = 4L,                       # intercept correction on ratio targets
   ic_families = c("pnl", "credit", "pricing"),
@@ -48,11 +53,11 @@ CFG <- list(
   cet1_target = 0.125,
   coe = 0.145,
   frontier_q = 0.80,                      # "frontier" = a top-quintile large bank
-  ## monthly models (09_monthly.R): admissible lags in months, the dynamic
-  ## pseudo-out-of-sample horizon, the first origin, the out-of-sample
-  ## screen, and the polynomial-lag length
+  ## monthly models (09_monthly.R): admissible lags in months, the
+  ## conditional-simulation horizon (36 months = 12 quarters), the first
+  ## origin, the out-of-sample screen, and the polynomial-lag length
   m_lags = c(0L, 1L, 2L, 3L, 6L, 9L, 12L),
-  m_h_oos = 12L,
+  m_h_oos = 36L,
   m_min_train = 84L,
   m_oos_top = 300L,
   m_pdl_L = 12L
