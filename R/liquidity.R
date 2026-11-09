@@ -141,16 +141,18 @@ deposit_liquidity_factors <- function(dm, date = NULL, factors = basel_liquidity
 #' @param hqla_adj Rand added to the HQLA stock: the difference between the
 #'   market and book value of bonds held in the buffer (Level 1 assets count
 #'   at market value, with no haircut).
+#' @param rsf_adj Rand added to required stable funding by assets held off
+#'   the line book (bonds encumbered in repo).
 #' @return Named numeric: `lcr`, `nsfr`, `hqla`, `outflows`, `inflows`, `asf`,
 #'   `rsf`.
 #' @export
-liquidity_ratios <- function(balance, bs, hqla_adj = 0) {
+liquidity_ratios <- function(balance, bs, hqla_adj = 0, rsf_adj = 0) {
   is_a <- bs$side == "asset"; is_l <- bs$side %in% c("deposit", "funding", "liability")
   is_e <- bs$side == "equity"
   hq <- max(sum(balance * bs$hqla) + hqla_adj, 0)
   outf <- sum(balance[is_l] * bs$runoff[is_l])
   inf <- min(sum(balance[is_a] * bs$runoff[is_a]), 0.75 * outf)
-  asf <- sum(balance[is_l | is_e] * bs$asf[is_l | is_e]); rsf <- sum(balance[is_a] * bs$rsf[is_a])
+  asf <- sum(balance[is_l | is_e] * bs$asf[is_l | is_e]); rsf <- sum(balance[is_a] * bs$rsf[is_a]) + rsf_adj
   c(lcr = hq / max(outf - inf, 1e-9), nsfr = asf / max(rsf, 1e-9), hqla = hq,
     outflows = outf, inflows = inf, asf = asf, rsf = rsf)
 }

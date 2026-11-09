@@ -85,7 +85,9 @@ negative for losses, on bonds sold in the quarter, pre-tax: recycled
 from OCI to profit or loss, as IFRS 9 requires for debt held at fair
 value through OCI) and `hqla_mtm` (the books' cumulative mark-to-market,
 realised and unrealised, pre-tax: the amount by which the HQLA stock at
-market value differs from its book value, for the LCR).}
+market value differs from its book value, for the LCR), `exposure`
+(rand held on balance sheet outside the line book, for the leverage
+ratio) and `rsf` (required stable funding those holdings add).}
 
 \item{buffer}{Optional list for sizing the liquidity buffer: `release`,
 the share of the HQLA line's balance released in each quarter (one value
@@ -101,7 +103,8 @@ not change the cost base or the operational and market risk.}
 }
 \value{
 List: `quarterly` (one row per quarter with NII, NIM, credit losses,
-  NIR, opex, PBT, NI, equity, RWA, CET1 ratio, ROE, LCR, ...),
+  NIR, opex, PBT, NI, equity, RWA, CET1 ratio, ROE, LCR, NSFR, the leverage
+  exposure and the leverage ratio with CET1 as the measure of capital, ...),
   `balances` (line x quarter), `lines` (line-level income/expense).
 }
 \description{

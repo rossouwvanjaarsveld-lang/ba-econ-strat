@@ -276,6 +276,7 @@ guard(lab0(lab_p10, "win") == 1 && abs(lab0(lab_r1, "d_roe_mean")) < 0.001 &&
 RB0 <- rd("risk_budget.rds")
 rb0v <- RB0$variants[RB0$variants$variant == "Every setting", ]
 rb0r <- RB0$regime$all[RB0$regime$all$regime == "All episodes", ]
+guard(RB0$carry$recommended$carry == "R50bn" && abs(RB0$carry$per_step[["roe"]] - 0.001) < 0.0002, "summary: the carry book")
 guard(rb0v$win == 1 && (rb0r$as + rb0r$buf) / rb0r$total > 0.6 && (rb0r$as + rb0r$buf) / rb0r$total < 0.75 &&
       RB0$central$all[["payout"]] == "R4" && rb0v$cet1_min >= CFG$cet1_min && rb0v$eve_max <= RB0$b_central + 0.001,
       "summary: the risk-budgeted portfolio")
@@ -467,7 +468,11 @@ What it finds:
     duration from swaps into bonds, so that the hedge and the bonds offset each
     other across the rate cycle. Of the macro rules only the payout rule
     survives the budget; the others are better used as risk triggers
-    ([Choosing the levers together](#risk-budget)).
+    ([Choosing the levers together](#risk-budget)). One lever was missing: the
+    balance sheet's own size. Asset-swapped government bonds funded in repo
+    outside the buffer add about `r ubps(RB0$carry$per_step[["roe"]])` of ROE per R25`r nb`bn; the leverage ratio
+    does not stop them, the stagflationary downside does, at `r RB0$carry$recommended$carry` (`r bps(RB0$carry$recommended$d_roe_vs_central)`),
+    and they need a credit-spread limit of their own ([Using the balance sheet itself](#carry)).
 12. **Is ARDL the right tool, and should it be asymmetric?** Yes, with
    asymmetries where the data support them. Judged with the macro path known
    and simulated twelve quarters ahead (perfect foresight), `r sum(MC$cw$ph < 0.10)` of `r nrow(MC$cw)`
@@ -543,6 +548,12 @@ kt(data.frame(Scenario = sc_short[rownames(ht)],
   the policy rate does not explain, estimated on the swap data.
 * **A more detailed flowchart** of the whole chain, from data to the ALCO
   decision ([The question and the design](#the-question-and-the-design)).
+* **v0.6.1 adds the lever the optimiser was missing**: repo-funded carry, the
+  first lever that uses the size of the balance sheet rather than rearranging
+  it, with a leverage-ratio floor, the CET1 floor checked in the named
+  scenarios and a credit-spread measure ([Using the balance sheet itself](#carry)).
+  The engine now reports the leverage ratio and the NSFR effect of bonds
+  encumbered in repo.
 
 The plan's own numbers do not change: NGFB's baseline ROE is `r pct(base$ngfb, 2)`, as in
 the previous version (v0.5.0, 21 October 2026); every new lever is an option
@@ -5304,6 +5315,102 @@ transfers between periods; how much duration to hold, and where, depends on
 the rate cycles in the sample, which is why the budget for it should be set
 explicitly rather than read off history.
 
+## Using the balance sheet itself: repo-funded carry {#carry}
+
+```{r rb-carry-setup}
+#| include: false
+CY <- RB$carry; cyt <- CY$spread_frontier; cyr <- CY$recommended; cyp <- CY$per_step
+cyreg <- CY$regime; rownames(cyreg) <- cyreg$regime
+cy_max <- cyt[nrow(cyt), ]
+rr1 <- LB$inputs$baseline$rates[1, ]; cy_gap <- rr1$repo + CY$repo_spread - rr1$tbill   # repo funding less the bills' yield, pp
+guard(cy_gap > 0.15 && cy_gap < 0.35, "the carry book's cost against the buffer's bills")
+cy_ep <- LB$inputs[LB$kind == "episode"]
+cy_w <- vapply(cy_ep, function(i) max(asset_swap_spread(i$rates, LB$jo_mk, bsm$beta, bsm$kappa)) - LB$jo_mk$bs, 0)
+cy_wd <- max(asset_swap_spread(LB$inputs$downside$rates, LB$jo_mk, bsm$beta, bsm$kappa)) - LB$jo_mk$bs
+guard(max(cy_w) > cy_wd, "history holds spread widenings as large as the downside's")
+guard(all(cyt$hedge_ratio == set_c[["hedge_ratio"]] & cyt$payout == set_c[["payout"]] & cyt$buffer == set_c[["buffer"]] &
+          cyt$asset_swap == set_c[["asset_swap"]] & cyt$duration == set_c[["duration"]]),
+      "the carry book is added to the central portfolio without moving any other lever")
+guard(all(diff(cyt$d_roe[is.finite(cyt$spread_step)]) > 0.0009) && abs(cyp[["roe"]] - 0.001) < 0.0002,
+      "each R25bn of carry adds about 10 bps")
+guard(cyr$carry == "R50bn" && !cyt$ok_scen[cyt$carry == "R75bn"][1] && all(cyt$lev_min > CY$lr_floor) &&
+      all(cyt$cet1_min > CFG$cet1_min) && cyr$cet1_downside < CFG$cet1_min + 0.0005,
+      "the downside caps the carry book at R50bn; neither the leverage floor nor the episodes' CET1 floor binds")
+guard(diff(range(cyreg$carry)) < 0.0003, "the carry book adds the same in every regime")
+guard(CY$binds[["leverage"]] < 0.05, "the leverage floor rules out few combinations")
+```
+
+Every lever so far rearranges the balance sheet NGFB already has: a rand of
+bills becomes a rand of bonds, a rand of bills repays a rand of wholesale
+funding, a rand of profit is paid out or kept. The one resource none of them
+uses is the size of the balance sheet itself. A bank can buy more government
+bonds than its liquidity buffer needs, asset-swap them exactly as in
+[Asset-swapped bonds](#asset-swap), and fund them in repo against the bonds
+themselves. That is how South African banks hold much of their sovereign
+book, and it is the lever this optimiser was missing.
+
+**What it earns.** Funded in repo rather than by displacing bills, each rand
+earns the bond–swap spread plus the floating leg less the repo rate:
+$bs + f_t - (r^{\text{repo}}_t + s^{\text{repo}})$, with $s^{\text{repo}}$ =
+`r num(100 * CY$repo_spread, 0)` bp, the spread NGFB already pays on its repo funding. At the jump-off that is `r num(CY$carry_jo, 2)` pp a year,
+about `r num(cy_gap, 2)` pp less than the same bond inside the buffer, because the bills it
+would replace yield below the policy rate while repo costs above it. It
+needs no HQLA (the bonds are encumbered, and secured funding against Level 1
+collateral carries no LCR outflow), no EVE budget (the swap removes the rate
+risk) and almost no RWA (rand claims on the sovereign); it adds 5% of its
+size to required stable funding and all of it to the leverage exposure.
+
+**What limits it.** Three limits are added for this section: the leverage
+ratio (CET1 over on-balance-sheet assets, a conservative stand-in for Tier 1)
+must stay at or above `r pct(CY$lr_floor, 0)` -- South Africa's minimum is 4%, and a D-SIB holds a
+further buffer of half its higher-loss-absorbency requirement from July 2025
+-- the CET1 floor must hold in the named scenarios as well as the episodes,
+and the book's credit-spread risk is measured: what a 100 bps widening of the
+bond–swap spread would take off the bond books, after tax, as a share of
+CET1.
+
+```{r rb-carry}
+#| echo: false
+cyt2 <- cyt[is.finite(cyt$spread_step), ]
+kt(data.frame(`Carry book` = cyt2$carry,
+              `ROE vs plan` = bps(cyt2$d_roe), `vs the central portfolio` = bps(cyt2$d_roe_vs_central),
+              `NII, 3 years, vs the central portfolio` = srbn(cyt2$nii - cyt2$nii[1]),
+              `100 bps spread widening (% of CET1)` = pct(cyt2$csrbb, 1),
+              `CET1 trough, episodes` = pct(cyt2$cet1_min, 2), `CET1 trough, downside` = pct(cyt2$cet1_downside, 2),
+              `Leverage ratio, lowest` = pct(pmin(cyt2$lev_min, cyt2$lev_scen_min), 2), `Every limit met` = ifelse(cyt2$ok_scen, "yes", "no"),
+              check.names = FALSE),
+   align = "lrrrrrrrl", caption = sprintf("The central portfolio with a repo-funded carry book of asset-swapped 5-year government bonds added at the jump-off (exact runs; averages across the %d episodes; the leverage ratio is the lowest quarter across the episodes and the named scenarios). Every other lever stays where the central portfolio has it.", RB$n_episodes))
+```
+
+Each R25`r nb`bn of carry book adds about `r ubps(cyp[["roe"]])` of ROE (`r urbn(cyp[["nii"]])` of NII over three years)
+and `r num(100 * cyp[["csrbb"]], 1)` points of CET1 to the loss from a 100 bps spread widening. It earns that
+in every macro regime alike, as the asset swap in the buffer does: the R100`r nb`bn
+book adds `r bps(cyreg["Rates rising", "carry"])` when rates rise, `r bps(cyreg["Rates falling", "carry"])` when they fall and `r bps(cyreg["A contraction", "carry"])` in episodes
+with a contraction.
+
+None of the limits the optimiser had so far stops it. Even with R100`r nb`bn added
+the leverage ratio is `r pct(min(cyt2$lev_min, cyt2$lev_scen_min), 1)` at its lowest, and across the episodes the CET1
+floor would not bind until well beyond the largest book tested. History does
+hold spread widenings as large as the downside's (`r num(max(cy_w), 2)` pp at the worst, in the
+episode that replays 2020, against `r num(cy_wd, 2)` pp), but not at the same time as a deep
+contraction and rising rates: 2020's came with 300 bps of cuts, 2015–16's
+with hikes but no deep recession, so the carry book's loss never landed on
+capital already thinned by credit losses and a hedge losing money. The
+stagflationary downside combines all three, and that is what binds: at
+R75`r nb`bn its CET1 trough falls to `r pct(cyt2$cet1_downside[cyt2$carry == "R75bn"], 2)`, below the `r pct(CFG$cet1_min, 1)` floor. The largest
+book that keeps every limit in every episode and every scenario is
+`r cyr$carry`, which lifts the central portfolio by `r bps(cyr$d_roe_vs_central)` to `r bps(cyr$d_roe)` against the plan,
+at the cost of raising the 100 bps spread loss from `r pct(CY$central_csrbb, 1)` to `r pct(cyr$csrbb, 1)` of CET1.
+
+The lesson for the risk budget is the more useful one. A limit set only on
+EVE, capital in replayed history and liquidity barely sees a position whose
+risk is the sovereign spread; the carry book walks through all three, and
+only a scenario built around a fiscal shock stops it. It needs its own limit -- a credit-spread budget in the banking book
+(CSRBB) -- and every point of CET1 put into that budget buys about
+`r ubps(cyp[["roe"]] / cyp[["csrbb"]] * 0.01)` of ROE. Whether that is a good price is a question about the
+sovereign, not about NGFB: the carry is the fiscal premium, and a bank that
+earns more of it is more exposed to the event the premium pays for.
+
 ## What the optimiser does not know
 
 * **History is the only distribution.** The `r RB$n_episodes` episodes overlap, so they hold
@@ -5618,6 +5725,11 @@ thing should know where it leads.
   deposit run-offs, wholesale funding spreads or the price of a forced asset
   sale, so it sees what surplus liquidity costs but not what it buys. The
   buffer's size belongs to the bank's own liquidity stress test.
+* **The carry book's funding is assumed to roll.** Repo funding is priced at
+  NGFB's calibrated spread over the policy rate in every quarter; in a market
+  dislocation (March 2020) repo haircuts and rates rise, and the book's real
+  backstop is the SARB's lending facilities, at a penalty rate. The engine
+  prices neither.
 * **The optimiser takes unpriced risks to their limits.** It maximises the
   ROE the engine prices, so the asset swap and the buffer release go to the
   caps they are given (90% of earning HQLA out of bills, the wholesale funding
@@ -5729,7 +5841,11 @@ Raftery, "Bayesian model selection in social research", *Sociological
 Methodology* (1995); Basel Committee on Banking Supervision, *Interest rate
 risk in the banking book* (April 2016) and *Basel III: The Liquidity Coverage
 Ratio and liquidity risk monitoring tools* (January 2013); IFRS Foundation,
-IFRS 9 *Financial Instruments* (debt held at fair value through OCI); E. F.
+IFRS 9 *Financial Instruments* (debt held at fair value through OCI);
+Prudential Authority, Directive D3/2025, *Matters relating to leverage buffer
+requirements* (2025), and regulation 38(15) of the Regulations relating to
+Banks (the 4% minimum leverage ratio); International Monetary Fund, *South
+Africa: The Financial Sector–Sovereign Nexus*, Working Paper WP/22/51 (2022); E. F.
 Fama and R. R. Bliss, "The information in long-maturity forward rates",
 *American Economic Review* (1987); J. Y. Campbell and R. J. Shiller, "Yield
 spreads and interest rate movements: a bird's eye view", *Review of Economic

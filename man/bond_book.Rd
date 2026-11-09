@@ -2,7 +2,7 @@
 % Please edit documentation in R/treasury.R
 \name{bond_book}
 \alias{bond_book}
-\title{A book of government bonds inside the HQLA buffer}
+\title{A book of government bonds, inside the HQLA buffer or funded in repo}
 \usage{
 bond_book(
   share,
@@ -11,7 +11,9 @@ bond_book(
   jo,
   type = c("duration", "asset_swap"),
   tax = 0.27,
-  spread = NULL
+  spread = NULL,
+  funding = NULL,
+  in_hqla = TRUE
 )
 }
 \arguments{
@@ -33,6 +35,12 @@ bonds swapped to floating).}
 
 \item{spread}{For "asset_swap", the bond-swap spread path (pp, one value
 per quarter; default [asset_swap_spread()] with `beta = kappa = 1`).}
+
+\item{funding}{Optional rate path (percent, one value per quarter) the
+book is funded at, in place of the Treasury bills' yield.}
+
+\item{in_hqla}{Whether the bonds sit in the liquidity buffer (`TRUE`) or
+outside it, encumbered in repo (`FALSE`).}
 }
 \value{
 List of quarterly vectors: `carry` (rand of NII over the bills the
@@ -47,11 +55,16 @@ List of quarterly vectors: `carry` (rand of NII over the bills the
   book value by, the engine's `overlay` `hqla_mtm`), `held` (rand),
   `pv01` (rand per basis point of the bond yield for "duration", of the
   swap rate -- zero, hedged -- for "asset_swap"), `spv01` (rand per basis
-  point of the bond-swap spread), `spread` (the path used).
+  point of the bond-swap spread), `spread` (the path used), `in_hqla`.
 }
 \description{
 The book is sized as a share of the earning HQLA at the jump-off (`H0`)
 after each quarter's trade: bought at the jump-off's prices in quarter 1
 and at the quarter's prices after (the convention the engine uses for swap
 tranches); cut pro rata across vintages, realising their mark-to-market.
+By default the bonds replace Treasury bills in the liquidity buffer. With
+`funding` and `in_hqla = FALSE` they are held outside the buffer instead,
+encumbered in repo: their carry is over the repo funding rate, their
+mark-to-market does not move the HQLA stock, and they add to the leverage
+exposure and to required stable funding (the engine's `overlay`).
 }

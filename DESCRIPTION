@@ -1,7 +1,7 @@
 Package: baeconstrat
 Type: Package
 Title: Macro-to-Balance-Sheet Strategy Analytics for South African Banks
-Version: 0.6.0
+Version: 0.6.1
 Authors@R: person("Rossouw", "van Jaarsveld", email = "rossouwvanjaarsveld@gmail.com",
                   role = c("aut", "cre"))
 Description: Ties macroeconomic scenarios to a bank's balance sheet, earnings and

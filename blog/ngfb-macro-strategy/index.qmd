@@ -1,0 +1,435 @@
+---
+title: "The Tide and the Swimming"
+summary: "A bank's macro model usually lives with the stress testers. Pointed at the whole balance sheet, it says what each economic outcome does to every line, how to reposition against the market, and how the bank is really doing against its competitors once the macro tide is taken out. No Gut Feelings Bank shows how, with public SARB data."
+date: 2026-11-03
+draft: false
+categories: [NGFB, ALM, Macro, Banking]
+description: "A bank's macro model usually lives with the stress testers. Pointed at the whole balance sheet, it says what each economic outcome does to every line, how to reposition against the market, and how the bank is really doing against its competitors once the macro tide is taken out. No Gut Feelings Bank shows how, with public SARB data."
+image: /posts/ngfb-macro-strategy/thumbnail.png
+execute:
+  freeze: true
+  echo: false
+bibliography: references.bib
+nocite: |
+  @SARB2025BA900, @Rbond2026, @PA2025Trends
+---
+
+```{=html}
+<div style="display:flex;align-items:flex-start;gap:14px;border:1px solid #5a4720;border-left:4px solid #e8a838;border-radius:8px;background:#1d1a12;padding:16px 20px;margin:1.5rem 0;font-size:0.9rem;line-height:1.6;color:#cccccc;">
+  <span style="font-size:1.2rem;flex-shrink:0;margin-top:1px;">⚠️</span>
+  <div>
+    <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#e8a838;margin-bottom:5px;">Synthetic bank notice</div>
+    <div>No Gut Feelings Bank does not exist. Its deposit franchise is the posterior-predictive draw the earlier posts used, and its asset mix is a draw from the population of the six largest South African banks, with every bank-specific effect integrated out. Real banks appear only pooled into peer groups of at least four. Nothing here ranks, names, or reverse-engineers any individual institution. Nothing here is financial advice.</div>
+  </div>
+</div>
+```
+
+{{< summary
+  trader="Most banks keep their macro model for the stress test. This post points No Gut Feelings Bank's at the whole balance sheet. A macro path runs through the industry and NGFB's market share into a quarterly engine, and three things come out. What to expect: the industry is an endowment play that earns more when rates rise, while NGFB, with an unsecured-heavy book and a large receive-fixed hedge, is a credit play whose rate exposure turns on how the SARB answers a downturn. How to reposition: tilting the balance sheet ahead of a stagflationary downside recovers 21 bps of a 253 bp hit and costs 48 bps if the upside comes instead, so the money is in levers that need no view. Chosen together under a risk budget, they lift NGFB's average ROE from 12.8% to 15.0% across 61 replayed histories and beat the plan in every one. Commercially, NGFB under-participates when rates fall. How it measures up: each book's growth is judged against its market's growth plus what a typical large bank achieves in the same phase of the cycle, which separates the tide from the swimming."
+  loremaster="Identity g_bank = g_sector + Δlog s. Stage 1: sign-restricted ARDL industry models (details withheld) map macro paths to 22 BA900/BA120 sector series. Stage 2: 400Δlog s on contraction/hiking/easing dummies and the sector cycle, by peer group (k ≥ 4) and for six large banks pooled with DerSimonian–Laird random effects; NGFB's parameters are a truncated posterior-predictive draw. Quarterly engine: line-level NII with a laddered receive-fixed hedge at actual ZAR swap fixings, sector credit-loss ratio with relative multipliers, CET1 with the FVOCI reserve, LCR/NSFR proxies calibrated to PA aggregates. Positioning: Black–Litterman-style reverse optimisation (c = G_baseline), x* = (G − c)/2κ. Risk budget: 25,200 lever combinations scored over 61 overlapping 12-quarter histories under 5th-percentile ROE, CET1, LCR, NSFR and ΔEVE limits: +213 bps, p5 +198 bps, 61/61 wins. Share strategy: market growth by regime against NGFB's share effect, with marginal headroom per rand. Scorecards: target = realised market growth + population par by regime + ambition, with percentiles from the population's predictive distribution.">}}
+
+```{r}
+#| label: setup-theme
+#| warning: false
+#| message: false
+#| code-summary: "Setup: libraries, the snapshot, dark-Slate theme"
+library(ggplot2); library(scales); library(patchwork)
+source("post_inputs.R")
+S <- load_post(); validate_post(S)   # fails the render if a number in the text drifts
+
+BG<-"#1b1b1d"; PANEL<-"#202024"; FG<-"#d8d8dc"; GRID<-"#37373c"
+ACCENT<-"#48b9c7"; ACCENT2<-"#e0a458"; WARN<-"#d65f5f"; MUTE<-"#8a8a90"
+INDIGO<-"#7a7ae8"; GREEN<-"#7fc7a0"; MID<-"#3c3c42"
+theme_slate <- function() theme_minimal(base_size = 13) + theme(
+  plot.background=element_rect(fill=BG,colour=NA), panel.background=element_rect(fill=PANEL,colour=NA),
+  panel.grid=element_line(colour=GRID,linewidth=.3), panel.grid.minor=element_blank(),
+  text=element_text(colour=FG), axis.text=element_text(colour=FG),
+  plot.title=element_text(colour=FG,face="bold",size=14),
+  plot.subtitle=element_text(colour=FG,size=9.5),
+  strip.text=element_text(colour=FG,face="bold",size=10.5),
+  legend.position="top", legend.background=element_rect(fill=PANEL,colour=NA),
+  legend.key=element_rect(fill=PANEL,colour=NA))
+SC_COL <- c(Baseline=ACCENT, Upside=INDIGO, Downside=WARN, `Downside with cuts`=ACCENT2)
+```
+
+```{r}
+#| label: numbers
+#| code-summary: "Every number the text quotes, from the snapshot"
+M <- S$meta; N <- S$ngfb
+st <- S$scen$sumtab; rownames(st) <- st$scenario
+at <- S$scen$attribution
+att <- function(s, e = "NGFB", ch = "total") at[at$scenario == s & at$entity == e, ch]
+se <- S$scen$sens; rownames(se) <- se$shock
+snh <- S$scen$sens_nohedge; rownames(snh) <- snh$shock
+wts <- S$scen$weights
+## the bank
+bal <- N$balance; bv <- setNames(bal$balance, bal$line)
+dep_mix <- bv[c("beh_operational", "beh_notice", "beh_savings", "beh_term")]; dep_mix <- dep_mix / sum(dep_mix)
+nsh <- setNames(N$shares$share, N$shares$product)
+mix <- setNames(N$mix$ngfb, N$mix$line); mixc <- setNames(N$mix$centre, N$mix$line)
+cg <- S$stage2$coef
+drift <- function(e, p, col = "est") cg[cg$entity == e & cg$product == p & cg$param == "(Intercept)", col]
+nreg <- S$stage2$regimes
+## positioning
+P <- S$pos; mv <- P$moves; rownames(mv) <- mv$move
+G <- P$gradients$G; cimp <- P$implied; gain <- P$gain; gni <- P$gain_ni; ps <- P$positions
+h_G <- G["downside", "hedge"]; h_c <- cimp[["hedge"]]; h_k <- mv["hedge", "cost"]
+h_x <- (h_G - h_c) / (2 * h_k)                       # points of non-maturity deposits
+bp_yr <- 1e-4 * P$m_ni[["baseline"]] / 3             # net income a year per bp of ROE (R'000)
+szp <- function(a, r, col = "gain") P$size[P$size$alpha == a & P$size$realised == r, col]
+capq <- function(cs, bs, r, col = "gain") P$capacity[P$capacity$cost_scale == cs & P$capacity$bound_scale == bs &
+                                                     P$capacity$realised == r, col]
+## share strategy and scorecards
+pb <- S$share$playbook; pbc <- function(p, r, col) pb[pb$product == p & pb$regime == r, col]
+mg <- S$share$margins; mgc <- function(p, f, col = "headroom") mg[mg$product == p & mg$funding == f, col]
+ma <- S$share$margins_all
+cards_guard <- ma$headroom[ma$scenario == "downside" & ma$product == "cards" & ma$funding == "wholesale"]
+sc <- S$share$scorecards; scc <- function(s, p, col = "percentile") sc[sc$scenario == s & sc$product == p, col]
+gn <- S$share$gainers
+gnc <- function(p, r, to) { v <- gn$share_of_loss[gn$product == p & gn$regime == r & gn$to == to]; if (length(v)) v else 0 }
+## the audit
+A <- S$audit; pr <- A$proxy
+corr <- A$correction; rownames(corr) <- corr$scenario
+ns <- A$nii_sens; rownames(ns) <- c("hedged", "unhedged", "sector")
+tr <- A$transition; tsw <- tr$switch_effect; rownames(tsw) <- tsw$scenario
+cas <- tr$cas_risk
+jz <- A$jz; jz$basis <- 100 * (jz$jibar3m_rb - jz$zaronia)
+eb <- A$equity_breaks; eb$sarb <- exp(eb$d_sarb) - 1; eb$oecd <- exp(eb$d_oecd) - 1
+fo <- A$fund_overlay; rownames(fo) <- fo$scenario
+## the levers
+LV <- S$levers; lvs <- LV$summary
+lv <- function(l, s, col = "d_roe_weighted") lvs[lvs$lever == l & lvs$setting == s, col]
+rc <- LV$ratio_curve
+slope10 <- function(col) 0.1 * unname(coef(lm(rc[[col]] ~ rc$ratio))[2])
+bsm <- LV$bs_model; asj <- LV$as_jo
+hq <- LV$hqla; rownames(hq) <- hq$scenario
+asw <- LV$asset_swap; rownames(asw) <- asw$scenario
+buf <- LV$buffer; bufs <- function(s, col = "d_roe", scn = "baseline") buf[buf$setting == s & buf$scenario == scn, col]
+combo <- LV$combo; rownames(combo) <- combo$scenario
+widen_max <- max(bsm$fit$bs5 - cummin(bsm$fit$bs5))   # largest rise in the spread since late 2023
+## the strategy lab
+L <- S$lab; ld <- L$dist[L$dist$phi == 0, ]; rownames(ld) <- ld$strategy
+pl <- L$plan_by_path; info <- L$info
+plan_roe <- S$rb$plan_stats$all[["roe"]]; plan_p5 <- S$rb$plan_stats$all[["p5"]]
+drv <- setNames(L$drivers$coef, L$drivers$term)
+g3 <- merge(L$gains_r3, pl[, c("path", "d_repo_mean")], by = "path")
+r3_rise <- mean(g3$gains[g3$d_repo_mean > 0.25]); r3_fall <- mean(g3$gains[g3$d_repo_mean < -0.25])
+fr <- L$frontier; frc <- function(r, t, col) fr[abs(fr$ratio - r) < 1e-3 & fr$tenor == t, col]
+ld_n <- function(k, col) ld[k, col]
+n_up <- sum(info$repo_mean - L$params$repo_jo > 0.25); n_dn <- sum(info$repo_mean - L$params$repo_jo < -0.25)
+## the risk-budgeted optimiser
+RB <- S$rb; cen <- RB$variants[RB$variants$variant == "Every setting", ]
+sta <- RB$variants[RB$variants$variant == "Static settings only", ]
+vr <- function(v, col = "d_roe") RB$variants[RB$variants$variant == v, col]
+rg <- RB$regime$all; rownames(rg) <- rg$regime
+rbs <- RB$scenarios; rownames(rbs) <- rbs$scenario
+fq <- RB$frontier; fqb <- function(b, st = FALSE, col = "roe") fq[abs(fq$budget - b) < 1e-9 & fq$static_only == st, col]
+spread_share <- (rg["All episodes", "as"] + rg["All episodes", "buf"]) / rg["All episodes", "total"]
+CY <- RB$carry; cyt <- CY$spread_frontier[is.finite(CY$spread_frontier$spread_step), ]
+rownames(cyt) <- cyt$carry; cyr <- CY$recommended; cyx <- RB$carry_extra
+lev_low <- pmin(cyt$lev_min, cyt$lev_scen_min); names(lev_low) <- cyt$carry
+```
+
+The deposit series ([one](/posts/deposit-beta-1-4/), [two](/posts/deposit-duration-2-4/), [three](/posts/hedge-optim-3-4/), [four](/posts/pricing-unknown-4-4/)) ended with No Gut Feelings Bank's funding understood about as well as public data allow. This post gives NGFB the rest of a balance sheet and ties it to the economy.
+
+Every quarter an ALCO gets a macro pack (the house view, an upside, a downside) and asks the same three questions of it. How exposed are we? What does each scenario do to our returns? What should we do before it arrives? There is a fourth that rarely makes the pack: what should we do when we do not know which scenario is coming? Which is always.
+
+Most banks own the machinery to answer them, and point it at something else. Macro models in a bank usually live with the stress-testing team: they turn the regulator's adverse scenario into a capital ratio for the internal capital adequacy assessment (ICAAP) and supply the forward-looking scenarios behind the IFRS 9 credit provisions. Once a year they prove that the bank survives something unpleasant, and then they go back in the cabinet with the good crockery. That undersells them. A model that can say what a recession does to capital can say what any macro path does to every line of the balance sheet, which makes it useful every quarter, for three jobs a stress test never asks of it:
+
+* **What to expect.** What each economic outcome does to every book, margin and ratio, and so what the card book, the home loans or the deposit franchise can reasonably deliver in each scenario.
+* **How to reposition.** Which balance-sheet and commercial decisions depend on a macro view and which do not, and what each is worth either way.
+* **How the bank measures up.** A business that grew its book 8% while its market grew 12% lost ground, however well 8% presents at bonus time. Take the market out of each segment's growth and what is left is what management actually did, and how that compares with competitors.
+
+This post builds the machinery for NGFB from public SARB data and puts it to all three jobs. The scenarios are illustrative and get a single table. The machinery, and what it says, get the rest.
+
+## The system on one page
+
+```{r}
+#| label: fig-system
+#| fig-cap: "How the pieces fit. A macro path, either a scenario or a replayed slice of history, runs through the industry models and NGFB's market-share dynamics into a quarterly engine that prices the balance sheet under the levers the ALCO sets. The results serve three uses: what to expect, how to reposition, and how the bank measures up against its peers."
+#| fig-width: 10
+#| fig-height: 5.5
+#| code-summary: "Figure: the system"
+rbox <- function(x0, x1, y0, y1, r = .14, n = 8) {          # rounded rectangle as a polygon
+  a <- seq(0, pi / 2, length.out = n)
+  data.frame(x = c(x1 - r + r * cos(a), x0 + r - r * sin(a), x0 + r - r * cos(a), x1 - r + r * sin(a)),
+             y = c(y1 - r + r * sin(a), y1 - r + r * cos(a), y0 + r - r * sin(a), y0 + r - r * cos(a)))
+}
+bx <- data.frame(rbind(
+  c("macro",  0.10, 2.00, 3.60, 5.30, "THE ECONOMY", "Macro path",         "a scenario, or a\nwindow of history\nreplayed from today", "model"),
+  c("s1",     2.45, 4.35, 3.60, 5.30, "STAGE 1",     "The industry",       "volumes, margins,\nlosses, fees, costs\n(22 sector series)", "model"),
+  c("s2",     4.80, 6.70, 3.60, 5.30, "STAGE 2",     "NGFB vs its market", "share gained or lost,\nby product and by\nmacro regime", "model"),
+  c("eng",    7.15, 9.05, 3.60, 5.30, "ENGINE",      "The balance sheet",  "NII with the hedge,\ncredit, capital,\nliquidity, EVE", "engine"),
+  c("data",   2.45, 4.35, 1.30, 2.95, "INPUT",       "Public data",        "SARB BA900, BA100,\nBA120; macro history;\nZAR swap fixings", "input"),
+  c("peers",  4.80, 6.70, 1.30, 2.95, "INPUT",       "Peer population",    "six large banks,\npooled; no bank\nshown on its own", "input"),
+  c("levers", 7.15, 9.05, 1.30, 2.95, "SET BY USE 2", "ALCO levers",        "hedge, bond and\nliquidity books,\npayout, lending mix", "input"),
+  c("u1",     9.70, 12.0, 4.70, 6.10, "USE 1",       "What to expect",     "each scenario's effect on\nevery line, by channel", "use"),
+  c("u2",     9.70, 12.0, 3.15, 4.55, "USE 2",       "How to reposition",  "positioning, levers under\na risk budget, where to\nlean in", "use"),
+  c("u3",     9.70, 12.0, 1.60, 3.00, "USE 3",       "How it measures up", "growth against a macro-\nadjusted target and the\npeer range", "use")),
+  stringsAsFactors = FALSE)
+names(bx) <- c("id", "x0", "x1", "y0", "y1", "lab", "title", "body", "kind")
+for (v in c("x0", "x1", "y0", "y1")) bx[[v]] <- as.numeric(bx[[v]])
+kcol <- c(model = ACCENT, engine = ACCENT2, input = MUTE, use = INDIGO)
+bx$col <- kcol[bx$kind]; bx$xc <- (bx$x0 + bx$x1) / 2
+polys <- do.call(rbind, lapply(seq_len(nrow(bx)), function(i) cbind(rbox(bx$x0[i], bx$x1[i], bx$y0[i], bx$y1[i]), id = bx$id[i], col = bx$col[i])))
+ar <- arrow(length = unit(0.09, "in"), type = "closed")
+seg <- data.frame(rbind(
+  c(2.00, 4.45, 2.45, 4.45), c(4.35, 4.45, 4.80, 4.45), c(6.70, 4.45, 7.15, 4.45),      # the chain
+  c(3.40, 2.95, 3.40, 3.60), c(5.75, 2.95, 5.75, 3.60), c(8.10, 2.95, 8.10, 3.60),      # inputs up
+  c(9.38, 5.40, 9.70, 5.40), c(9.38, 3.85, 9.70, 3.85), c(9.38, 2.30, 9.70, 2.30)))     # the fan-out
+names(seg) <- c("x", "y", "xend", "yend")
+bus <- data.frame(x = c(9.05, 9.38, 9.38), xend = c(9.38, 9.38, 9.38), y = c(4.45, 2.30, 4.45), yend = c(4.45, 5.40, 2.30))
+dash <- data.frame(x = c(5.75, 5.75, 10.85), y = c(1.30, 0.95, 0.95), xend = c(5.75, 10.85, 10.85), yend = c(0.95, 0.95, 1.60))
+ggplot() +
+  geom_polygon(data = polys, aes(x, y, group = id), fill = "#26262b", colour = polys$col, linewidth = .7) +
+  geom_segment(data = bus, aes(x, y, xend = xend, yend = yend), colour = FG, linewidth = .45, alpha = .8) +
+  geom_segment(data = seg, aes(x, y, xend = xend, yend = yend), colour = FG, linewidth = .45, alpha = .8, arrow = ar) +
+  geom_segment(data = dash[1:2, ], aes(x, y, xend = xend, yend = yend), colour = MUTE, linewidth = .45, linetype = "22") +
+  geom_segment(data = dash[3, ], aes(x, y, xend = xend, yend = yend), colour = MUTE, linewidth = .45, linetype = "22", arrow = ar) +
+  geom_path(data = data.frame(x = c(9.70, 9.22, 9.22), y = c(3.38, 3.38, 2.50)), aes(x, y), colour = MUTE, linewidth = .45, linetype = "22") +
+  geom_segment(aes(x = 9.22, y = 2.50, xend = 9.05, yend = 2.50), colour = MUTE, linewidth = .45, linetype = "22", arrow = ar) +
+  annotate("text", x = 0.15, y = 2.95, label = "Nothing in the chain forecasts\nthe economy. Every macro path\nis taken as given, and the\nonly question is what it\ndoes to the bank.", colour = MUTE, size = 3.1, fontface = "italic", hjust = 0, vjust = 1, lineheight = 1.05) +
+  annotate("text", x = 8.3, y = 0.95, label = "par and frontier, for the scorecards", colour = MUTE, size = 3, vjust = 1.5) +
+  annotate("text", x = 4.575, y = 5.62, label = "bank growth = market growth + change in market share", colour = MUTE, size = 3.1, fontface = "italic") +
+  geom_text(data = bx, aes(xc, y1 - .2, label = lab), colour = bx$col, size = 2.9, fontface = "bold") +
+  geom_text(data = bx, aes(xc, y1 - .48, label = title), colour = FG, size = 3.9, fontface = "bold") +
+  geom_text(data = bx, aes(xc, y1 - .72, label = body), colour = "#b8b8bf", size = 3.2, vjust = 1, lineheight = 1.0) +
+  coord_cartesian(xlim = c(0, 12.1), ylim = c(0.6, 6.2), expand = FALSE) +
+  labs(title = "The system on one page",
+       subtitle = "A macro path runs through the industry and NGFB's market share into a quarterly balance-sheet engine.\nWhat comes out serves three uses.") +
+  theme_slate() + theme(panel.grid = element_blank(), axis.text = element_blank(), axis.title = element_blank(),
+                        panel.background = element_rect(fill = BG, colour = NA))
+```
+
+Read it left to right. A macro path, one of the ALCO's scenarios or a three-year window of South African history replayed from today, goes first to the **industry**. Stage 1 maps it to the growth of every loan and deposit book in the banking sector, lending spreads, deposit costs, the credit-loss ratio, fees and operating costs: `r M$n_sector_models` series in all, built on the SARB's BA900 and BA100/BA120 returns. The workhorse is a sign-restricted ARDL model, and its specification and estimates are staying in the drawer, like any koeksister recipe worth having. Here it is a black box with a simple contract: hand it a macro path, and it hands back the industry's volumes, margins and losses along that path.
+
+The bank is tied to the industry rather than straight to the economy, because a single bank's history is short and full of things that are not the economy: an acquisition, a new strategy, a provisioning overlay. Regress that on GDP and the elasticities come out unstable and, more often than is comfortable, the wrong sign. It is like judging a flyhalf's form by the rand–dollar exchange rate. There will be a correlation, and you will regret acting on it. Instead the bank is tied to its market by an identity. For any product $p$,
+
+$$g^{\text{bank}}_{p,t} \;=\; g^{\text{sector}}_{p,t} \;+\; \Delta \log s_{p,t}$$
+
+says that the bank's growth in quarter $t$ is the market's growth plus the change in its market share $s$, with growth measured in logs so that the pieces add. The first piece is the tide, and Stage 1 explains it. The second is the swimming, and **Stage 2** models it, product by product, as
+
+$$400\,\Delta \log s_t \;=\; a \;+\; \delta_{\text{c}}\,C_t \;+\; \delta_{\text{h}}\,H_t \;+\; \delta_{\text{e}}\,E_t \;+\; \kappa\,\big(g^{\text{sector}}_t - \bar g\big) \;+\; e_t .$$
+
+The 400 turns a quarter's change in log share into percentage points a year. $a$ is the structural drift, how fast a bank gains or loses share in an ordinary quarter. $C_t$, $H_t$ and $E_t$ switch on in contraction, hiking and easing quarters, so each $\delta$ is the extra drift in that phase of the cycle. $\kappa$ asks whether the bank grows faster than the market when the market booms ($g^{\text{sector}}_t$ above its average $\bar g$), and $e_t$ is everything else.
+
+The equation is estimated for peer groups of at least four banks and for each of the six large banks, and the six are pooled into a population with a random-effects estimator that separates genuine differences between banks from estimation noise [@DerSimonianLaird1986]. That population does two jobs. NGFB is a draw from it: a typical large bank rather than a copy of any one, and on the unsecured-heavy side as it happens, with `r pct(mix[["retail_unsecured"]])` of its assets in unsecured retail lending against the population centre's `r pct(mixc[["retail_unsecured"]])`. And it supplies the yardstick for judging a bank against its competitors, of which more below. No real bank's estimate is ever shown on its own.
+
+The **engine** then does what a bank's planning model does, quarter by quarter and line by line. Each book grows with its market and NGFB's share dynamics, wholesale funding balances the books, and every line earns or costs the industry's projected rates. The structural hedge gets its own term, because most of the rate risk lives there: each receive-fixed tranche $i$ earns its fixed rate $F_i$ and pays the floating benchmark $f_t$ on its notional $N_i$, so the hedge adds $H_t = \sum_i N_i\,(F_i - f_t)/4$ to net interest income each quarter. Below that come credit losses, fees, costs, tax and the payout, and out come ROE, CET1, the LCR and NSFR, and the sensitivity of the economic value of equity (EVE) to rates. Every ROE in this post is the average over the twelve quarters from 2026Q3 to 2029Q2.
+
+The levers the ALCO sets (the hedge, the bond and liquidity books, the payout and the lending mix) go into the engine, and choosing them is the second of the three uses. Nothing in the chain forecasts the economy. Every macro path is taken as given, which is deliberate: an ALCO will argue about which scenario is coming whatever any model says, and the model's job is to make sure everyone is arguing about the same consequences.
+
+## What to expect: from the economy to the balance sheet
+
+The scenarios are illustrative, so they get one table. The downside is stagflationary on purpose, built the way the SARB built the adverse scenario of its 2023 common stress test [@SARB2023FSR], and a variant runs the same contraction with cuts instead of hikes.
+
+| Scenario | What happens | NGFB ROE | against the baseline | Sector ROE |
+|---|---|---|---|---|
+| **Baseline** | the SARB's guidance: repo at 7.25%, easing to 6.25%; growth about 1.6% | `r pct(st["baseline", "ngfb"])` | – | `r pct(st["baseline", "sector"])` |
+| **Upside** | faster disinflation and a growth dividend; 100 bps more cuts | `r pct(st["upside", "ngfb"])` | `r bps(st["upside", "ngfb"] - st["baseline", "ngfb"])` | `r pct(st["upside", "sector"])` |
+| **Downside** | stagflation: a rand sell-off, 150 bps of hikes, a two-year contraction | `r pct(st["downside", "ngfb"])` | `r bps(st["downside", "ngfb"] - st["baseline", "ngfb"])` | `r pct(st["downside", "sector"])` |
+| **Downside with cuts** | the same contraction, with 150 bps of cuts | `r pct(st["downside_cuts", "ngfb"])` | `r bps(st["downside_cuts", "ngfb"] - st["baseline", "ngfb"])` | `r pct(st["downside_cuts", "sector"])` |
+
+To see where each difference comes from, the engine swaps one block of inputs at a time from the baseline into the scenario: volumes, pricing (rates, yields and deposit costs, and with them the hedge), credit losses, and fees and costs. Whatever is left when all four are swapped together is the interaction, so the bars always add up. The sector is run through the same engine without a hedge.
+
+```{r}
+#| label: fig-attribution
+#| fig-cap: "Where each scenario's ROE effect comes from, for NGFB and for the BA900 sector run through the same engine without a hedge. Bars add up to the total."
+#| fig-width: 10
+#| fig-height: 5
+#| code-summary: "Figure: attribution"
+chl <- c(volume = "Volume", pricing = "Pricing\n(incl. hedge)", credit = "Credit", fees_costs = "Fees and\ncosts", total = "Total")
+ad <- do.call(rbind, lapply(names(chl), function(ch) data.frame(scenario = at$scenario, entity = at$entity, ch = chl[[ch]], v = 1e4 * at[[ch]])))
+ad$scenario <- factor(SC_LAB[ad$scenario], levels = SC_LAB[c("upside", "downside", "downside_cuts")])
+ad$ch <- factor(ad$ch, levels = chl); ad$entity <- factor(ad$entity, levels = c("NGFB", "Sector"))
+ggplot(ad, aes(ch, v, fill = entity)) +
+  geom_hline(yintercept = 0, colour = FG, linewidth = .3) +
+  geom_col(position = position_dodge(width = .74), width = .68, alpha = .92) +
+  facet_wrap(~scenario, ncol = 3) +
+  scale_fill_manual(values = c(NGFB = ACCENT, Sector = MUTE), name = NULL) +
+  labs(title = "The sector is an endowment play; NGFB is a credit play",
+       subtitle = "Change in three-year average ROE against the baseline, by channel, bps",
+       x = NULL, y = "bps of ROE") +
+  theme_slate() + theme(axis.text.x = element_text(size = 8.5, lineheight = .9), panel.grid.major.x = element_blank())
+```
+
+Three things stand out, and none of them shows up in a capital ratio.
+
+* **The industry is an endowment play.** Deposits and equity are cheap funding lent out at market rates, so when rates rise the sector earns more on them [@Drechsler2021Banking]. Without a hedge, the downside's higher repo path adds `r bps(att("downside", "Sector", "pricing"))` to the sector's ROE through pricing, more than its credit losses take away (`r bps(att("downside", "Sector", "credit"))`).
+* **NGFB is a credit play.** Its unsecured-heavy book makes credit its largest channel (`r bps(att("downside", "NGFB", "credit"))` in the downside), and its receive-fixed hedge more than offsets its endowment, so the higher rates *cost* it `r ubps(att("downside", "NGFB", "pricing"))` through pricing. Over three years the downside takes `r rbn(st["baseline", "ni"] - st["downside", "ni"], 1)` off NGFB's net income while the unhedged sector's ROE rises.
+* **The SARB decides the sign.** With the same contraction and cuts instead of hikes, the hedge earns NGFB `r bps(att("downside_cuts", "NGFB", "pricing"))` through pricing and the total loss shrinks to `r ubps(att("downside_cuts"))`, a little over half the stagflationary one. A structural hedge protects against the downturns of 2009 and 2020. It does not protect against a downturn that arrives with hikes.
+
+The same runs say what each part of the bank can reasonably be expected to deliver. As a conversion rate, one basis point of ROE is worth about `r rmn(bp_yr)` of net income a year. A repo path 100 bps higher costs hedged NGFB `r ubps(se["repo_up_100", "total"])` of ROE, where unhedged it would add `r ubps(snh["repo_up_100", "total"])`: the hedge was sized for deposits that reprice more slowly than the industry models find, which makes it a position as much as a hedge. One point less GDP growth for three years costs `r ubps(se["gdp_down_1", "total"])`, almost all of it through credit losses, so growth is NGFB's largest exposure by a distance. Book by book, the engine gives every product's growth, margin and losses in every scenario, which is what a business unit's plan should be built on, and what its performance is judged against further down.
+
+## How to reposition
+
+Repositioning comes in three kinds, and they need different amounts of conviction: commercial (where to grow against the market), tactical (ahead of a scenario) and structural (the treasury levers, which turn out to need no view at all).
+
+### Where to lean in against the market
+
+The cheapest growth a bank forgoes is in markets that are growing while it is not. Two numbers place NGFB in each product and phase of the cycle. The first is how fast the market grows in that regime, from the industry's history, which no bank controls. The second is NGFB's *share effect*, how much faster or slower than the market its book grows, from Stage 2.
+
+```{r}
+#| label: fig-quadrant
+#| fig-cap: "Market growth against NGFB's share effect, product by product and regime by regime. Bottom right is the uncomfortable corner: the market grows faster than usual and NGFB loses share. Grey cells need no action."
+#| fig-width: 10
+#| fig-height: 5.8
+#| code-summary: "Figure: where to lean in"
+pq <- pb; pq$lab <- paste0(PROD_LAB[pq$product], ", ", pq$regime)
+pq$act <- factor(pq$action, levels = c("Push", "Defend", "Guard", "Let go", "Ride", "Hold"))
+act_col <- c(Push = ACCENT2, Defend = WARN, Guard = INDIGO, `Let go` = GREEN, Ride = ACCENT, Hold = MUTE)
+nh <- pq[pq$action != "Hold", ]
+ggplot(pq, aes(market_dev, ngfb_effect)) +
+  geom_hline(yintercept = 0, colour = FG, linewidth = .3) + geom_vline(xintercept = 0, colour = FG, linewidth = .3) +
+  geom_point(aes(colour = act), size = ifelse(pq$action == "Hold", 2, 3.2), alpha = ifelse(pq$action == "Hold", .55, 1)) +
+  (if (requireNamespace("ggrepel", quietly = TRUE))
+     ggrepel::geom_text_repel(data = nh, aes(label = lab), colour = FG, size = 2.9, seed = 20260622, box.padding = .45,
+                              min.segment.length = .2, segment.colour = MUTE, segment.size = .3)
+   else geom_text(data = nh, aes(label = lab), colour = FG, size = 2.9, vjust = -1, check_overlap = TRUE)) +
+  annotate("text", x = 6.5, y = -6.6, label = "market grows, NGFB loses share", colour = MUTE, size = 3.1, hjust = 1) +
+  scale_colour_manual(values = act_col, name = NULL, drop = FALSE) +
+  labs(title = "NGFB under-participates when rates fall",
+       subtitle = "Each point is a product in a regime. NGFB's share effect excludes its structural drift, so this is about the cycle.",
+       x = "market growth in the regime, against its average (pp a year)", y = "NGFB's growth against the market (pp a year)") +
+  theme_slate()
+```
+
+The rules that turn a cell into an action are economic, not statistical. **Push** where NGFB loses share while its market grows at or above its average: that is under-participation. **Defend** where it loses secured or deposit share to competitors taking good business. **Guard** where it gains unsecured share while the market weakens. **Let go** where it cedes unsecured share in a contraction, which is risk appetite doing its job. **Ride** gains in a growing market.
+
+The gap is in easing cycles. When rates fall, the card market grows `r num(pbc("cards", "easing", "market_growth"), 1)`% a year against an average of `r num(pbc("cards", "easing", "market_growth") - pbc("cards", "easing", "market_dev"), 1)`%, yet NGFB's card book grows `r num(-pbc("cards", "easing", "ngfb_effect"), 1)` points a year more slowly than the market, and the Challengers take `r pct(gnc("cards", "easing", "Challengers"), 0)` of what it gives up. Corporate loans and vehicle and asset finance follow the same pattern. Whether to push is a question of marginal economics. Per rand of new lending, the rate earned, less the funds-transfer price, the cost of the liquidity that funding needs, the expected credit loss and the cost of the capital it ties up, leaves the *headroom* that origination and servicing can cost before growth destroys value. Cards clear it even on wholesale funding (`r sprintf("%+.1f", mgc("cards", "wholesale"))` pp a year); corporate lending and vehicle finance clear it comfortably only when they bring their own deposits.
+
+The guard case is cards in a contraction, where NGFB gains share (`r sprintf("%+.1f", pbc("cards", "contraction", "ngfb_effect"))` pp a year) while the market all but stops. In a downturn the customer walking in is often the one other banks have just declined, so the action is to tighten underwriting on new card business when GDP turns, not to celebrate the share.
+
+### Ahead of a scenario
+
+When the ALCO has a view, the balance sheet can lean towards it: shift HQLA into a lending book, swap wholesale funding for deposits, or change the hedge. The naive way to choose, maximising the engine's ROE, grows every loan book out of HQLA and claims `r ubps(P$naive_gain)` of ROE, the kind of number that wins a consultant a second engagement. The engine prices a new rand of lending at the book's average yield, loss rate and cost, so every risk asset looks better than a Treasury bill.
+
+The fix is to assume the current balance sheet is right for the baseline, which is what a balance sheet built for the bank's central plan ought to be. If $G_s$ is how much one unit of a move adds to ROE in scenario $s$, that reveals an implied marginal cost for every move, $c = G_{\text{baseline}}$: whatever a move would add under the baseline must be offset by costs the engine cannot see. It is the trick Black and Litterman used to back implied returns out of market weights [@BlackLitterman1992]. Positioning then trades only on how a scenario *changes* each move's value, and with an execution cost that rises with the square of the move, $\kappa x^2$, the best move has a closed form:
+
+$$x^{*} \;=\; \frac{G_{X} - c}{2\,\kappa} .$$
+
+Move in the direction the scenario shifts the move's value, by an amount proportional to how far it shifts it, and inversely proportional to how expensive the move is to make. Ahead of the downside that means cutting the hedge from `r pct(N$hedge_ratio)` to `r pct(N$hedge_ratio + ps["downside", "hedge"] / 100)` of non-maturity deposits, because its floating leg reprices up with the hikes, swapping `r pct((ps["downside", "fund_savings"] + ps["downside", "fund_operational"]) / 100, 2)` of assets of wholesale funding for deposits, and trimming cards and personal loans by `r pct(-(ps["downside", "into_cards"] + ps["downside", "into_personal"]) / 100, 2)` of assets. It recovers `r ubps(gain["downside", "downside"])` of the downside's `r ubps(att("downside"))` hit, about `r pct(gain["downside", "downside"] / -att("downside"), 0)`, because positioning cannot undo a credit cycle inside a year. And it is a bet.
+
+```{r}
+#| label: fig-regret
+#| fig-cap: "The cost of being wrong. Change in NGFB's three-year average ROE from positioning for the scenario in the row when the scenario in the column arrives, net of implied and execution costs, full engine."
+#| fig-width: 8
+#| fig-height: 3.9
+#| code-summary: "Figure: the regret matrix"
+gm <- expand.grid(pos = rownames(gain), real = colnames(gain), stringsAsFactors = FALSE)
+gm$v <- 1e4 * gain[cbind(gm$pos, gm$real)]
+gm$pos <- factor(paste("Positioned for the", tolower(SC_LAB[gm$pos])), levels = rev(paste("Positioned for the", tolower(SC_LAB[c("baseline", "upside", "downside")]))))
+gm$real <- factor(SC_LAB[gm$real], levels = SC_LAB[c("baseline", "upside", "downside")])
+ggplot(gm, aes(real, pos, fill = v)) +
+  geom_tile(colour = BG, linewidth = 2) +
+  geom_text(aes(label = ifelse(abs(v) < .05, "0", sprintf("%+.0f bps", v))), colour = FG, size = 4.2, fontface = "bold") +
+  scale_fill_gradient2(low = WARN, mid = MID, high = ACCENT, midpoint = 0, guide = "none") +
+  scale_x_discrete(position = "top") +
+  labs(title = "Being wrong costs more than being right earns", subtitle = "Scenario that arrives", x = NULL, y = NULL) +
+  theme_slate() + theme(panel.grid = element_blank())
+```
+
+Position for the downside and get the upside, and it costs `r ubps(gain["downside", "upside"])`: being wrong costs `r num(-gain["downside", "upside"] / gain["downside", "downside"], 1)` times what being right earns. If the contraction comes with cuts instead of hikes, the hedge move flips sign while the credit leg does not, so the credit side of a downside positioning is robust and the rate side is a bet on the SARB. With no strong view, the probability-weighted answer is close to the plan. The framework's value is in telling the ALCO what to do, and what it costs if it is wrong, as conviction builds. Positioning ahead of a downside is like packing an umbrella for a Highveld afternoon: cheap and sensible, and it will not stop the hail.
+
+### Without a view: the treasury levers under a risk budget
+
+The bigger money needs no view. Replay every three-year window of South African history since 2008 from today's balance sheet, `r RB$n_episodes` overlapping episodes, and timing the rate cycle earns nothing: a hedge ratio keyed to the level of rates makes `r bps(ld_n("R1 hedge ratio with the policy rate", "d_roe_mean"))` on average. What pays is collecting premia. Government bonds asset-swapped to floating earn the fiscal premium South African bonds pay over swaps, without the interest-rate risk. Releasing surplus Treasury bills to repay wholesale funding saves the gap between the two, about nine basis points of ROE for every R10bn. Neither depends on where the repo rate goes.
+
+The levers are chosen together, because they draw on the same capital, liquidity and rate risk. An optimiser scores all `r format(RB$n_combos, big.mark = ",")` combinations of the hedge ratio and tenor, the bond books, the size of the liquidity buffer and the payout across the histories. It keeps the best combination that leaves the 5th-percentile ROE no worse than the plan's, CET1 at fair value above 11.5%, the LCR and NSFR above their floors, and the change in EVE for a ±200 bp shock no more than `r pct(RB$b_central, 0)` of CET1 away from the plan's [@BCBS2016IRRBB].
+
+```{r}
+#| label: fig-headline
+#| fig-cap: "Where two points of ROE come from. Each bar is a lever's contribution to NGFB's three-year average ROE, averaged over the replayed histories, against the bank's plan. The two spread trades in the middle need no view on rates."
+#| fig-width: 10
+#| fig-height: 4.9
+#| code-summary: "Figure: the headline bridge"
+ra <- rg["All episodes", ]
+wf <- data.frame(
+  lab = c("Plan", "Hedge ratio\nand tenor", "Ten-year\nbonds", "Asset-swapped\nbonds", "Smaller\nbuffer",
+          "Payout\nrule", "Interaction", "Risk-budgeted\nportfolio", "Repo-funded\ncarry", "With the\ncarry book"),
+  val = 1e4 * c(0, ra$hedge, ra$dur, ra$as, ra$buf, ra$pay, ra$interaction, cen$d_roe, cyr$d_roe_vs_central, cyr$d_roe),
+  kind = c("level", rep("step", 6), "level", "step", "level"))
+cum <- 0; wf$lo <- wf$hi <- NA
+for (i in seq_len(nrow(wf))) {
+  if (wf$kind[i] == "level") { wf$lo[i] <- 0; wf$hi[i] <- wf$val[i]; cum <- wf$val[i] }
+  else { wf$lo[i] <- cum; wf$hi[i] <- cum + wf$val[i]; cum <- cum + wf$val[i] }
+}
+wf$x <- seq_len(nrow(wf)); wf$lab <- factor(wf$lab, levels = wf$lab)
+wf$fill <- ifelse(wf$kind == "level", MUTE, ifelse(wf$val >= 0, ACCENT, WARN))
+wf$fill[wf$x == 9] <- ACCENT2
+wf$txt <- ifelse(wf$kind == "level", sprintf("%.0f", wf$hi), sprintf("%+.0f", wf$val))
+wf$txt[1] <- sprintf("%.1f%%\nROE", 100 * plan_roe)
+ggplot(wf) +
+  geom_rect(aes(xmin = x - .38, xmax = x + .38, ymin = pmin(lo, hi), ymax = pmax(lo, hi), fill = fill), alpha = .92) +
+  geom_segment(data = wf[-nrow(wf), ], aes(x = x + .38, xend = x + .62, y = hi, yend = hi), colour = MUTE, linewidth = .3) +
+  geom_text(aes(x = x, y = pmax(lo, hi) + 7, label = txt), colour = FG, size = 3.3, vjust = 0, lineheight = .9) +
+  geom_hline(yintercept = 0, colour = FG, linewidth = .3) +
+  scale_fill_identity() +
+  scale_x_continuous(breaks = wf$x, labels = levels(wf$lab), expand = expansion(add = .4)) +
+  scale_y_continuous(limits = c(-15, 265), breaks = seq(0, 250, 50)) +
+  labs(title = "Where two points of ROE come from",
+       subtitle = sprintf("Change in NGFB's three-year average ROE against its plan (%.1f%%), averaged over %d replayed macro histories, bps",
+                          100 * plan_roe, RB$n_episodes),
+       x = NULL, y = "bps of ROE") +
+  theme_slate() + theme(axis.text.x = element_text(size = 9, lineheight = .9), panel.grid.major.x = element_blank())
+```
+
+The answer keeps the hedge at the rate-neutral 37% of non-maturity deposits, reinvests maturing swaps at seven years, holds 12.5% of earning HQLA in ten-year bonds and 50% in asset-swapped bonds, releases bills down to an LCR of 160%, and pays out more while the economy grows and capital is ample. NGFB's average ROE across the histories rises from `r pct(plan_roe)` to `r pct(plan_roe + cen$d_roe)`, its 5th percentile from `r pct(plan_p5)` to `r pct(plan_p5 + cen$d_p5)`, and it beats the plan in every one of the `r RB$n_episodes` histories. The two spread trades are `r pct(spread_share, 0)` of the gain and pay the same in every macro regime.
+
+One more lever adds `r bps(cyr$d_roe_vs_central)`: the balance sheet's own size. Asset-swapped bonds funded in repo outside the buffer use no HQLA and no rate budget, so they walk straight through limits set only on rates, capital and liquidity, until the stagflationary downside's capital floor stops them at `r cyr$carry`. It is the closest thing here to a free lunch, and like every free lunch in Sandton, somebody else is paying. Here it is the sovereign, which is why the carry needs a credit-spread limit of its own [@HesseMiyajima2022Nexus].
+
+## How it measures up against competitors
+
+The identity that split growth into tide and swimming also judges it. A product's growth is the market's growth plus the bank's share effect. The first is the macro environment, which no bank controls. The second is what management controls, and the peer population says what a typical large bank achieves in the same phase of the cycle. So a macro-adjusted target for product $p$ in quarter $t$ is
+
+$$\text{target}_{p,t} \;=\; \underbrace{g^{\text{market}}_{p,t}}_{\text{realised, from the returns}} \;+\; \underbrace{\text{par}_p(\text{regime}_t)}_{\text{peer population}} \;+\; \text{ambition}_p ,$$
+
+and performance is actual growth less the target. The market term is measured after the fact, so nobody is punished for a recession or rewarded for a boom. **Par** is the typical large bank (the population mean), the **frontier** a top-quintile large bank (the 80th percentile of the population's predictive distribution), and a bank's percentile between them says how it compares with its competitors in that phase of the cycle without naming or ranking any of them. Set in advance, the target is scenario-contingent: it says what each business can reasonably be expected to deliver if the scenario arrives. Looked back on, it separates the tide from the swimming. Warren Buffett's version is that you only find out who has been swimming naked when the tide goes out; a macro-adjusted target finds out while the tide is still in.
+
+```{r}
+#| label: fig-scorecards
+#| fig-cap: "Macro-adjusted scorecards: NGFB's percentile among large banks for its share effect in each scenario (teal above par, red below), labelled with the share effect in pp a year."
+#| fig-width: 10
+#| fig-height: 3.9
+#| code-summary: "Figure: scorecards"
+sk <- sc; sk$prod <- factor(PROD_LAB[sk$product], levels = PROD_LAB[c("mortgages_res", "mortgages_com", "vaf", "cards", "personal_other", "corp_all", "nmd", "beh_term")])
+sk$scn <- factor(SC_LAB[sk$scenario], levels = rev(SC_LAB[c("baseline", "upside", "downside")]))
+ggplot(sk, aes(prod, scn, fill = percentile)) +
+  geom_tile(colour = BG, linewidth = 1.5) +
+  geom_text(aes(label = sprintf("%.0f%%\n%+.1f pp", 100 * percentile, share_effect)), colour = FG, size = 3.1, lineheight = .9) +
+  scale_fill_gradient2(low = WARN, mid = MID, high = ACCENT, midpoint = .5, limits = c(0, 1), labels = percent, name = "percentile") +
+  scale_x_discrete(labels = function(x) vapply(x, function(z) paste(strwrap(z, 13), collapse = "\n"), "")) +
+  labs(title = "Separating the tide from the swimming", subtitle = "NGFB's percentile among large banks, and its share effect", x = NULL, y = NULL) +
+  theme_slate() + theme(panel.grid = element_blank(), axis.text.x = element_text(size = 8.5, lineheight = .9), legend.position = "right")
+```
+
+In the downside most of the slowdown in NGFB's books is the market's. Even so, NGFB is below par in home loans (`r ord(scc("downside", "mortgages_res"))` percentile), because a typical large bank gains mortgage share in a contraction as lenders retreat to secured credit, and NGFB gains less. Cards sit near the frontier (`r ord(scc("downside", "cards"))` percentile), which is the guard case above, and a reminder that a high percentile is not automatically good news. In the upside the growth is in cards, corporate lending and vehicle finance, and NGFB is below par in all three. The message for management is to protect share where the growth is, not to bank the tide.
+
+The same yardstick shows who has been swimming fastest at peer-group level. Since 2008 the Challengers have taken share at double-digit rates in credit cards (`r sprintf("%+.1f", drift("Challengers", "cards"))` pp a year) and household deposits (`r sprintf("%+.1f", drift("Challengers", "dep_retail"))` pp), while the Big Four ceded share slowly but steadily. A business judged only against its own last year would miss both.
+
+## Caveats
+
+* **Public data only.** Prices, losses and costs are the sector's, and NGFB differs from the sector only through its mix and its hedge. A real bank would put its own pricing, loss history and costs in their place.
+* **The industry models are a black box here.** Everything downstream depends on them, and this post deliberately does not show them.
+* **History is one history.** The `r RB$n_episodes` overlapping windows hold about five or six independent three-year periods, one global financial crisis and one pandemic.
+* **The optimiser takes unpriced risks to their limits.** The engine does not stress run-offs, funding spreads or fire-sale prices, so the spread trades go as far as the caps they are given, and the caps are judgement.
+* **Execution costs size the positioning.** Their direction is robust; their size rests on an assumption about how expensive it is to move a franchise inside a year.
+
+## What an ALCO can do with this on Monday
+
+1. **Run every macro pack through the whole balance sheet**, not only the capital ratio, and attribute each scenario's effect by channel, so the committee argues about the same consequences.
+2. **Fund the premia that need no view first.** Asset-swapped government bonds and a right-sized liquidity buffer pay in every macro regime; size them against a credit-spread limit and the bank's own liquidity stress test.
+3. **Position ahead of a scenario in proportion to conviction**, with the cost of being wrong on the same page as the gain.
+4. **Push where the market grows and the bank does not**, with its own funding behind the growth, and guard share won in a downturn.
+5. **Judge each business against a macro-adjusted target and the peer range**, not against last year.
+
+The macro view matters enormously to what NGFB earns, but mattering is not the same as being tradeable. What the machinery does reliably is translate: an economic outcome into every line of the balance sheet, a view into a position and its cost if wrong, and a growth number into a verdict on the swimming. That is a better use of a macro model than one stress test a year.
+
+*No refunds, as the man selling coat hangers at the robot will tell you: none of this is advice, and your own bank's risk budget should be set by people who can see its books.*
+
+---
+
+## References
+
+::: {#refs}
+:::

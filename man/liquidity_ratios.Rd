@@ -4,7 +4,7 @@
 \alias{liquidity_ratios}
 \title{LCR and NSFR proxies for a balance sheet}
 \usage{
-liquidity_ratios(balance, bs, hqla_adj = 0)
+liquidity_ratios(balance, bs, hqla_adj = 0, rsf_adj = 0)
 }
 \arguments{
 \item{balance}{Numeric balances, aligned with `bs`.}
@@ -14,6 +14,9 @@ liquidity_ratios(balance, bs, hqla_adj = 0)
 \item{hqla_adj}{Rand added to the HQLA stock: the difference between the
 market and book value of bonds held in the buffer (Level 1 assets count
 at market value, with no haircut).}
+
+\item{rsf_adj}{Rand added to required stable funding by assets held off
+the line book (bonds encumbered in repo).}
 }
 \value{
 Named numeric: `lcr`, `nsfr`, `hqla`, `outflows`, `inflows`, `asf`,

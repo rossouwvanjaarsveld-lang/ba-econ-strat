@@ -81,6 +81,17 @@ guard(all(is.finite(unlist(jo_mk))) && jo_mk$bs > 0, "no bond or swap rates at t
 bsm <- A$bs_model
 as_spread <- function(rates) asset_swap_spread(rates, jo_mk, beta = bsm$beta, kappa = bsm$kappa)
 dur_book <- function(share, inp) bond_book(share, H0, inp$rates, jo_mk, "duration", tax = ea$tax)
+## balance-sheet carry: asset-swapped 5-year government bonds held outside the
+## buffer, encumbered in repo and funded at the rate of NGFB's existing repo
+## funding (the policy rate plus its calibrated spread); `size` in rand
+## ('000), one value per quarter
+eb_rf <- N$engine_bs[N$engine_bs$line == "repo_funding", ]
+guard(nrow(eb_rf) == 1 && eb_rf$ref == "repo" && is.finite(eb_rf$spread), "no repo funding line to price the carry book")
+repo_sp <- 100 * eb_rf$spread                                         # pp over the policy rate
+carry_book <- function(size, inp) bond_book(rep_len(size, nrow(inp$rates)) / H0, H0, inp$rates, jo_mk, "asset_swap",
+                                            tax = ea$tax, spread = as_spread(inp$rates),
+                                            funding = inp$rates$repo + repo_sp, in_hqla = FALSE)
+carry_max <- 1e8                                                      # R100bn, the largest carry book tested
 as_book <- function(share, inp) bond_book(share, H0, inp$rates, jo_mk, "asset_swap", tax = ea$tax,
                                           spread = as_spread(inp$rates))
 ## the buffer: the share of the HQLA line released (Treasury bills repaying
@@ -139,7 +150,8 @@ rule_paths <- function(sc, inp) {
               good = gd > 0,
               tilt = ifelse(du < 0 & gd > 1, 5, ifelse(du > 1 | gd < 0, -5, 0)),
               alpha = pmin(pmax(0.5 * (bs - 0.5), 0), 0.50),
-              stress = stress, release = ifelse(stress, rel_185, rel_170), spread_seen = bs)
+              stress = stress, release = ifelse(stress, rel_185, rel_170), spread_seen = bs,
+              carry = carry_max * pmin(pmax(bs - 0.5, 0), 1))
   out[c("theta_all", "alpha_all")] <- fit_cap(out$theta, out$alpha, out$release)
   out
 }

@@ -62,12 +62,17 @@ asset_swap_spread <- function(rates, jo, beta = 1, kappa = 1) {
   jo$bs + kappa * ((rates$gov10y - jo$gov10y) - beta * (float_rate(rates) - jo$float3m))
 }
 
-#' A book of government bonds inside the HQLA buffer
+#' A book of government bonds, inside the HQLA buffer or funded in repo
 #'
 #' The book is sized as a share of the earning HQLA at the jump-off (`H0`)
 #' after each quarter's trade: bought at the jump-off's prices in quarter 1
 #' and at the quarter's prices after (the convention the engine uses for swap
 #' tranches); cut pro rata across vintages, realising their mark-to-market.
+#' By default the bonds replace Treasury bills in the liquidity buffer. With
+#' `funding` and `in_hqla = FALSE` they are held outside the buffer instead,
+#' encumbered in repo: their carry is over the repo funding rate, their
+#' mark-to-market does not move the HQLA stock, and they add to the leverage
+#' exposure and to required stable funding (the engine's `overlay`).
 #'
 #' @param share Share of `H0` in the book after each quarter's trade (one
 #'   value per quarter).
@@ -81,6 +86,10 @@ asset_swap_spread <- function(rates, jo, beta = 1, kappa = 1) {
 #' @param tax Tax rate applied to the mark-to-market.
 #' @param spread For "asset_swap", the bond-swap spread path (pp, one value
 #'   per quarter; default [asset_swap_spread()] with `beta = kappa = 1`).
+#' @param funding Optional rate path (percent, one value per quarter) the
+#'   book is funded at, in place of the Treasury bills' yield.
+#' @param in_hqla Whether the bonds sit in the liquidity buffer (`TRUE`) or
+#'   outside it, encumbered in repo (`FALSE`).
 #' @return List of quarterly vectors: `carry` (rand of NII over the bills the
 #'   book replaces: the engine's `overlay` `nii`), `gains` (realised gains,
 #'   negative for losses, on the bonds sold in the quarter, pre-tax: under
@@ -93,12 +102,14 @@ asset_swap_spread <- function(rates, jo, beta = 1, kappa = 1) {
 #'   book value by, the engine's `overlay` `hqla_mtm`), `held` (rand),
 #'   `pv01` (rand per basis point of the bond yield for "duration", of the
 #'   swap rate -- zero, hedged -- for "asset_swap"), `spv01` (rand per basis
-#'   point of the bond-swap spread), `spread` (the path used).
+#'   point of the bond-swap spread), `spread` (the path used), `in_hqla`.
 #' @export
-bond_book <- function(share, H0, rates, jo, type = c("duration", "asset_swap"), tax = 0.27, spread = NULL) {
+bond_book <- function(share, H0, rates, jo, type = c("duration", "asset_swap"), tax = 0.27, spread = NULL,
+                      funding = NULL, in_hqla = TRUE) {
   type <- match.arg(type)
   n <- nrow(rates); share <- rep_len(share, n)
-  tb <- rates$tbill; fl <- float_rate(rates)
+  tb <- if (is.null(funding)) rates$tbill else rep_len(funding, n)    # what the book is carried against
+  fl <- float_rate(rates)
   ## the price that moves the book: the 10-year yield, or the 5-year spread
   px <- if (type == "duration") rates$gov10y else spread %||% asset_swap_spread(rates, jo)
   if (length(px) != n) stop("bond_book: the spread path needs one value per quarter")
@@ -121,8 +132,9 @@ bond_book <- function(share, H0, rates, jo, type = c("duration", "asset_swap"), 
       realised <- realised + gains[t]
       B <- B * f
     }
-    ## carry over bills: the bond's yield (duration), or the locked spread plus
-    ## the floating leg (asset swap), less the bills' yield
+    ## carry over bills (or the repo funding): the bond's yield (duration), or
+    ## the locked spread plus the floating leg (asset swap), less the bills'
+    ## yield (or the funding rate)
     carry[t] <- if (type == "duration") sum(B * (lock - tb[t])) / 400 else sum(B * (lock + fl[t] - tb[t])) / 400
     md_end <- mdv(t, mat - 0.25)
     unreal <- sum(-md_end * (px[t] - lock) / 100 * B)
@@ -134,21 +146,30 @@ bond_book <- function(share, H0, rates, jo, type = c("duration", "asset_swap"), 
     pv01[t] <- if (type == "duration") spv01[t] else 0
   }
   list(carry = carry, gains = gains, oci = oci, oci_unreal = oci_unreal, mtm = mtm, held = held,
-       pv01 = pv01, spv01 = spv01, spread = px)
+       pv01 = pv01, spv01 = spv01, spread = px, in_hqla = in_hqla)
 }
 
 #' The engine overlay for a set of bond books
 #'
 #' Sums the books' carry (NII), realised gains (profit or loss) and
-#' mark-to-market (the buffer's market value, for the LCR) quarter by
-#' quarter, in the form [run_engine()]'s `overlay` takes.
+#' mark-to-market quarter by quarter, in the form [run_engine()]'s `overlay`
+#' takes. Only books inside the buffer move the HQLA stock at market value;
+#' books held outside it, encumbered in repo, add their holding to the
+#' leverage exposure and the Basel factor for encumbered Level 1 assets to
+#' required stable funding (encumbered for less than six months: the same as
+#' unencumbered, 5%).
 #' @param dates Quarter dates of the run.
 #' @param books List of [bond_book()] results (may be empty).
-#' @return Data frame `date`, `nii`, `gains`, `hqla_mtm`.
+#' @param rsf_encumbered Required-stable-funding factor of a book held
+#'   outside the buffer.
+#' @return Data frame `date`, `nii`, `gains`, `hqla_mtm`, `exposure`, `rsf`.
 #' @export
-books_overlay <- function(dates, books) {
-  tot <- function(v) Reduce(`+`, lapply(books, `[[`, v), rep(0, length(dates)))
-  data.frame(date = dates, nii = tot("carry"), gains = tot("gains"), hqla_mtm = tot("mtm"))
+books_overlay <- function(dates, books, rsf_encumbered = 0.05) {
+  inb <- vapply(books, function(b) !isFALSE(b$in_hqla), TRUE)
+  tot <- function(v, keep = rep(TRUE, length(books)))
+    Reduce(`+`, lapply(books[keep], `[[`, v), rep(0, length(dates)))
+  data.frame(date = dates, nii = tot("carry"), gains = tot("gains"), hqla_mtm = tot("mtm", inb),
+             exposure = tot("held", !inb), rsf = rsf_encumbered * tot("held", !inb))
 }
 
 #' Share of the HQLA line to release for a target LCR

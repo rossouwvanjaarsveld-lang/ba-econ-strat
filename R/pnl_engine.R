@@ -91,7 +91,9 @@ ref_rate <- function(rates, ref) {
 #'   from OCI to profit or loss, as IFRS 9 requires for debt held at fair
 #'   value through OCI) and `hqla_mtm` (the books' cumulative mark-to-market,
 #'   realised and unrealised, pre-tax: the amount by which the HQLA stock at
-#'   market value differs from its book value, for the LCR).
+#'   market value differs from its book value, for the LCR), `exposure`
+#'   (rand held on balance sheet outside the line book, for the leverage
+#'   ratio) and `rsf` (required stable funding those holdings add).
 #' @param buffer Optional list for sizing the liquidity buffer: `release`,
 #'   the share of the HQLA line's balance released in each quarter (one value
 #'   per quarter, a level, not an increment), `line` (default "hqla") and
@@ -104,7 +106,8 @@ ref_rate <- function(rates, ref) {
 #'   on the balance sheet before the release: Treasury bills held or sold do
 #'   not change the cost base or the operational and market risk.
 #' @return List: `quarterly` (one row per quarter with NII, NIM, credit losses,
-#'   NIR, opex, PBT, NI, equity, RWA, CET1 ratio, ROE, LCR, ...),
+#'   NIR, opex, PBT, NI, equity, RWA, CET1 ratio, ROE, LCR, NSFR, the leverage
+#'   exposure and the leverage ratio with CET1 as the measure of capital, ...),
 #'   `balances` (line x quarter), `lines` (line-level income/expense).
 #' @export
 run_engine <- function(bs, growth, rates, credit, ratios, plug = "wholesale_other",
@@ -245,6 +248,8 @@ run_engine <- function(bs, growth, rates, credit, ratios, plug = "wholesale_othe
     ov <- if (is.null(ovr)) 0 else sum(as.numeric(ovr$nii))
     ov_g <- if (is.null(ovr$gains)) 0 else sum(as.numeric(ovr$gains))
     ov_m <- if (is.null(ovr$hqla_mtm)) 0 else sum(as.numeric(ovr$hqla_mtm))
+    ov_x <- if (is.null(ovr$exposure)) 0 else sum(as.numeric(ovr$exposure))
+    ov_r <- if (is.null(ovr$rsf)) 0 else sum(as.numeric(ovr$rsf))
     nii <- ii - ie + hedge_pl + ov
     clr_t <- as.numeric(credit$clr[credit$date == dates[t]]) / 100
     imp <- sum(avg[loans] * bs$clr_mult[loans]) * clr_t / 4
@@ -269,7 +274,8 @@ run_engine <- function(bs, growth, rates, credit, ratios, plug = "wholesale_othe
     rwa_cr <- sum(cur * bs$rw * is_a)
     rwa <- rwa_cr + 12.5 * op_risk_alpha * gi_ann + rwa_other * (sum(cur[is_a]) + rel_amt)
     iea <- sum(avg[is_a & bs$earning])
-    liq <- liquidity_ratios(cur, bs, hqla_adj = ov_m)   # LCR and NSFR proxies, HQLA at market (liquidity.R)
+    liq <- liquidity_ratios(cur, bs, hqla_adj = ov_m, rsf_adj = ov_r)   # LCR and NSFR proxies, HQLA at market (liquidity.R)
+    expo <- sum(cur[is_a]) + ov_x                    # leverage exposure: on-balance-sheet assets
     inc_mat[, t] <- ifelse(is_a, flow, -flow)
     out[[t]] <- data.frame(
       date = dates[t], total_assets = sum(cur[is_a]), iea = iea,
@@ -283,6 +289,7 @@ run_engine <- function(bs, growth, rates, credit, ratios, plug = "wholesale_othe
       roe = 4 * ni / ((E + E_new) / 2), roa = 4 * ni / ta_avg,
       rwa = rwa, cet1_ratio = cet1_share * E_new / rwa,
       lcr = liq[["lcr"]], nsfr = liq[["nsfr"]],
+      exposure = expo, leverage = cet1_share * E_new / expo,
       loans = sum(cur[loans]), deposits = sum(cur[dep]), plug_balance = cur[pl],
       stringsAsFactors = FALSE)
     E <- E_new; cet1_prev <- cet1_share * E_new / rwa

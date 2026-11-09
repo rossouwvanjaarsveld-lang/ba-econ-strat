@@ -30,8 +30,21 @@
 #   buffer     the LCR proxy the release targets at the jump-off {the plan,
 #              180, 170, 160%, or R7};
 #   payout     {30, 50, 70%, or R4};
+#   carry      asset-swapped 5-year government bonds held outside the buffer,
+#              encumbered in repo and funded at NGFB's repo funding rate
+#              {none, R25bn, R50bn, R75bn, R100bn, or R8: none below a 0.5 pp
+#              bond-swap spread, R100bn at 1.5 pp or more};
 #  the bond books and the release within 90% of earning HQLA in every quarter
 #  of every path (combinations that breach it are not admissible).
+#  The main results (sections 3-6) are for the first five levers, which only
+#  rearrange the balance sheet. Section 7 adds the carry book, which uses a
+#  resource none of them touches -- the balance sheet's own size -- with two
+#  more limits: the leverage ratio (CET1 over on-balance-sheet assets, a
+#  conservative stand-in for Tier 1) at or above 5% in every quarter of every
+#  episode (the regulatory minimum is 4%, plus a buffer for a D-SIB), and,
+#  where stated, a budget for credit-spread risk: what a 100 bp widening of
+#  the bond-swap spread would take off the bond books, after tax, as a share
+#  of CET1.
 #
 #  Method.
 #   1. Every setting runs through the engine on its own, all else at the
@@ -106,11 +119,15 @@ rel_tg <- vapply(lcr_tg, rel_lcr, 0)
 guard(all(diff(rel_tg) > 0) && max(rel_tg) / sc_hq < hq_cap, "the buffer releases are out of order")
 buf_set <- c(list(plan = NA), stats::setNames(as.list(lcr_tg), sprintf("LCR %.0f%%", 100 * lcr_tg)), list(R7 = "R7"))
 pay_set <- list(`30%` = 0.3, `50%` = 0.5, `70%` = 0.7, R4 = "R4")
-levers <- list(hedge = hedge_set, dur = dur_set, as = as_set, buf = buf_set, pay = pay_set)
+carry_set <- c(list(none = 0), stats::setNames(as.list(c(0.25, 0.5, 0.75, 1) * carry_max), c("R25bn", "R50bn", "R75bn", "R100bn")),
+               list(R8 = "R8"))
+levers <- list(hedge = hedge_set, dur = dur_set, as = as_set, buf = buf_set, pay = pay_set, carry = carry_set)
+lv_main <- c("hedge", "dur", "as", "buf", "pay")                  # the levers of sections 3-6
 ## the plan's setting on each lever
-plan_opt <- c(hedge = i_plan, dur = 1L, as = 1L, buf = 1L, pay = 2L)
+plan_opt <- c(hedge = i_plan, dur = 1L, as = 1L, buf = 1L, pay = 2L, carry = 1L)
 is_rule <- list(hedge = hedge_set$ratio == "R1" | hedge_set$tenor == "R2", dur = names(dur_set) == "R3",
-                as = names(as_set) == "R6", buf = names(buf_set) == "R7", pay = names(pay_set) == "R4")
+                as = names(as_set) == "R6", buf = names(buf_set) == "R7", pay = names(pay_set) == "R4",
+                carry = names(carry_set) == "R8")
 
 ## the strategy on one lever for one path
 dur_path <- function(o, rp) if (identical(dur_set[[o]], "R3")) rp$theta else rep(dur_set[[o]], n)
@@ -118,25 +135,29 @@ as_path <- function(o, rp) if (identical(as_set[[o]], "R6")) rp$alpha else rep(a
 rel_path <- function(o, rp) { s <- buf_set[[o]]
   if (identical(s, "R7")) rp$release else if (is.na(s)) rep(0, n) else rep(rel_tg[match(s, lcr_tg)], n) }
 pay_of <- function(o, rp) if (identical(pay_set[[o]], "R4")) payout_rule(rp$good) else pay_set[[o]]
+carry_path <- function(o, rp) if (identical(carry_set[[o]], "R8")) rp$carry else rep(carry_set[[o]], n)
 hedge_of <- function(o, rp) hedge_spec(ratio_set[[hedge_set$ratio[o]]], tenor_set[[hedge_set$tenor[o]]], rp)
 ## a combination (one option index per lever) as engine arguments
 combo_run <- function(inp, rp, cb) {
   bk <- list()
   if (cb[["dur"]] != 1L) bk <- c(bk, list(dur_book(dur_path(cb[["dur"]], rp), inp)))
   if (cb[["as"]] != 1L) bk <- c(bk, list(as_book(as_path(cb[["as"]], rp), inp)))
+  ci <- if ("carry" %in% names(cb)) cb[["carry"]] else 1L
+  if (ci != 1L) bk <- c(bk, list(carry_book(carry_path(ci, rp), inp)))
   rel <- if (cb[["buf"]] == 1L) NULL else rel_path(cb[["buf"]], rp)
   run(inp, hedge = hedge_of(cb[["hedge"]], rp), payout = pay_of(cb[["pay"]], rp), books = bk, release = rel)
 }
 
 ## ---- 2. every setting on its own, on every path ---------------------------------------------
-mets <- c("roe", "nii", "ni", "cet1fv", "lcr", "nsfr", "pv01", "cet1amt", "rwa", "oci")
+mets <- c("roe", "nii", "ni", "cet1fv", "lcr", "nsfr", "pv01", "cet1amt", "rwa", "oci", "expo", "spv01")
 qx <- function(r) {
   q <- r$quarterly; bk <- r$books
   pv <- q$hedge_pv01 + (if (length(bk)) Reduce(`+`, lapply(bk, `[[`, "pv01")) else 0)
+  sp <- if (length(bk)) Reduce(`+`, lapply(bk, `[[`, "spv01")) else rep(0, nrow(q))
   oci <- oci_reserve(r)
   cbind(roe = q$roe, nii = q$nii, ni = q$net_income, cet1fv = q$cet1_ratio + oci / q$rwa,
         lcr = q$lcr, nsfr = q$nsfr, pv01 = pv, cet1amt = ea$cet1_share * q$equity, rwa = q$rwa, oci = oci,
-        plug0 = as.numeric(q$plug_balance <= 1e-6))
+        expo = q$exposure, spv01 = sp, plug0 = as.numeric(q$plug_balance <= 1e-6))
 }
 one_path <- function(k) {
   inp <- inp_all[[k]]; rp <- rp_all[[k]]
@@ -159,7 +180,8 @@ if (nzchar(rb_cache) && !file.exists(rb_cache)) saveRDS(runs, rb_cache)
 ## the plan's settings reproduce the plan
 for (k in paths) guard(max(abs(runs[[k]]$plan[, "roe"] - L$rule_paths[[k]]$plan_roe_q)) < 1e-12,
                        "the plan differs from the lab's in %s", k)
-n_runs <- sum(vapply(names(levers), function(lv) length(runs[[1]][[lv]]) - 1L, 0L)) + 1L
+n_runs <- sum(vapply(lv_main, function(lv) length(runs[[1]][[lv]]) - 1L, 0L)) + 1L          # the five levers
+n_runs_carry <- length(runs[[1]]$carry) - 1L                                                # and the carry book
 t_runs <- as.numeric(difftime(Sys.time(), t_start, units = "mins"))
 
 ## changes against the plan, flattened: one row per option, the episodes'
@@ -200,8 +222,10 @@ ep_mean <- function(X) { a <- array(X, c(nrow(X), n, K)); s <- a[, 1, ]; if (nro
   for (t in 2:n) { b <- a[, t, ]; if (nrow(X) == 1L) b <- matrix(b, 1); s <- s + b }; s / n }
 plan_ep <- ep_mean(matrix(PL$roe, 1))[1, ]
 plan_stats <- lapply(halves, function(S) c(roe = mean(plan_ep[S]), p5 = q_type7(plan_ep[S], 0.05)))
-nl <- c(hedge = nrow(hedge_set), dur = length(dur_set), as = length(as_set), buf = length(buf_set), pay = length(pay_set))
-gi <- expand.grid(dur = seq_len(nl[["dur"]]), as = seq_len(nl[["as"]]), buf = seq_len(nl[["buf"]]))
+nl <- c(hedge = nrow(hedge_set), dur = length(dur_set), as = length(as_set), buf = length(buf_set), pay = length(pay_set),
+        carry = length(carry_set))
+gi <- expand.grid(dur = seq_len(nl[["dur"]]), as = seq_len(nl[["as"]]), buf = seq_len(nl[["buf"]]),
+                  carry = seq_len(nl[["carry"]]))
 use_all <- U$dur[gi$dur, , drop = FALSE] + U$as[gi$as, , drop = FALSE] + U$buf[gi$buf, , drop = FALSE]
 use_max <- apply(use_all, 1, max)                          # the same for every hedge and payout
 rm(use_all)
@@ -229,9 +253,10 @@ equity_path <- function(NI, RWA, p, EQA) {
   list(roe = matrix(roe, R), cet1 = matrix(cet, R), cet1amt = ea$cet1_share * matrix(eq, R))
 }
 score_block <- function(h, p) {
-  add <- c("nii", "ni", "lcr", "nsfr", "pv01", "rwa", "oci", "cet1amt")
+  add <- c("nii", "ni", "lcr", "nsfr", "pv01", "rwa", "oci", "cet1amt", "expo", "spv01")
   X <- lapply(stats::setNames(add, add), function(m) {
-    s <- D$dur[[m]][gi$dur, , drop = FALSE] + D$as[[m]][gi$as, , drop = FALSE] + D$buf[[m]][gi$buf, , drop = FALSE]
+    s <- D$dur[[m]][gi$dur, , drop = FALSE] + D$as[[m]][gi$as, , drop = FALSE] + D$buf[[m]][gi$buf, , drop = FALSE] +
+      D$carry[[m]][gi$carry, , drop = FALSE]
     sweep(s, 2, PL[[m]] + D$hedge[[m]][h, ] + D$pay[[m]][p, ], "+")
   })
   ep_ <- equity_path(X$ni, X$rwa, p, X$cet1amt / ea$cet1_share)
@@ -239,20 +264,30 @@ score_block <- function(h, p) {
   roe_e <- ep_mean(ep_$roe); nii_e <- ep_mean(X$nii) * n
   cet_e <- by_ep(ep_$cet1 + X$oci / X$rwa, pmin); lcr_e <- by_ep(X$lcr, pmin); nsf_e <- by_ep(X$nsfr, pmin)
   eve_e <- by_ep(eve, pmax)
+  ## the leverage ratio (CET1 over the leverage exposure) and what a 100 bp
+  ## widening of the bond-swap spread would cost the bond books, after tax, as
+  ## a share of CET1
+  lev_e <- by_ep(ep_$cet1amt / X$expo, pmin)
+  csr_e <- by_ep(100 * X$spv01 * (1 - ea$tax) / ep_$cet1amt, pmax)
   do.call(rbind, lapply(names(halves), function(hv) { S <- halves[[hv]]
-    data.frame(half = hv, hedge = h, dur = gi$dur, as = gi$as, buf = gi$buf, pay = p,
+    data.frame(half = hv, hedge = h, dur = gi$dur, as = gi$as, buf = gi$buf, pay = p, carry = gi$carry,
                roe = rowMeans(roe_e[, S, drop = FALSE]), roe_p5 = apply(roe_e[, S, drop = FALSE], 1, q_type7, 0.05),
                win = rowMeans(roe_e[, S, drop = FALSE] > rep(plan_ep[S], each = nrow(gi)) + 1e-12),
                nii = rowMeans(nii_e[, S, drop = FALSE]),
                cet1_min = apply(cet_e[, S, drop = FALSE], 1, min), lcr_min = apply(lcr_e[, S, drop = FALSE], 1, min),
                nsfr_min = apply(nsf_e[, S, drop = FALSE], 1, min), eve_max = apply(eve_e[, S, drop = FALSE], 1, max),
+               lev_min = apply(lev_e[, S, drop = FALSE], 1, min), csrbb_max = apply(csr_e[, S, drop = FALSE], 1, max),
                use_max = use_max, stringsAsFactors = FALSE) }))
 }
-cand <- do.call(rbind, lapply(seq_len(nl[["hedge"]]), function(h) do.call(rbind, lapply(seq_len(nl[["pay"]]), function(p) score_block(h, p)))))
-cand$rules <- is_rule$hedge[cand$hedge] | is_rule$dur[cand$dur] | is_rule$as[cand$as] | is_rule$buf[cand$buf] | is_rule$pay[cand$pay]
-cand$p5_floor <- vapply(cand$half, function(hv) plan_stats[[hv]][["p5"]], 0)
-cand$ok_base <- cand$use_max <= hq_cap + 1e-9 & cand$roe_p5 >= cand$p5_floor - 1e-12 & cand$cet1_min >= CFG$cet1_min &
-  cand$lcr_min >= CFG$lcr_min & cand$nsfr_min >= nsfr_floor
+cand_all <- do.call(rbind, lapply(seq_len(nl[["hedge"]]), function(h) do.call(rbind, lapply(seq_len(nl[["pay"]]), function(p) score_block(h, p)))))
+cand_all$rules <- is_rule$hedge[cand_all$hedge] | is_rule$dur[cand_all$dur] | is_rule$as[cand_all$as] | is_rule$buf[cand_all$buf] |
+  is_rule$pay[cand_all$pay] | is_rule$carry[cand_all$carry]
+cand_all$p5_floor <- vapply(cand_all$half, function(hv) plan_stats[[hv]][["p5"]], 0)
+cand_all$ok_base <- cand_all$use_max <= hq_cap + 1e-9 & cand_all$roe_p5 >= cand_all$p5_floor - 1e-12 &
+  cand_all$cet1_min >= CFG$cet1_min & cand_all$lcr_min >= CFG$lcr_min & cand_all$nsfr_min >= nsfr_floor
+## sections 3-6: the five levers that rearrange the balance sheet (no carry book)
+cand <- cand_all[cand_all$carry == 1L, ]
+cand$carry <- NULL
 t_enum <- as.numeric(difftime(Sys.time(), t_start, units = "mins")) - t_runs
 ca <- cand[cand$half == "all", ]
 ## the plan is a candidate, satisfies every limit and scores as itself; and
@@ -260,7 +295,7 @@ ca <- cand[cand$half == "all", ]
 pr <- ca[ca$hedge == i_plan & ca$dur == 1 & ca$as == 1 & ca$buf == 1 & ca$pay == 2, ]
 guard(nrow(pr) == 1 && pr$ok_base && abs(pr$roe - plan_stats$all[["roe"]]) < 1e-10 && pr$eve_max < 1e-10,
       "the plan is not a feasible candidate scoring as itself")
-single_err <- unlist(lapply(names(levers), function(lv) vapply(seq_len(nl[[lv]]), function(o) {
+single_err <- unlist(lapply(lv_main, function(lv) vapply(seq_len(nl[[lv]]), function(o) {
   cb <- plan_opt; cb[[lv]] <- o
   z <- ca[ca$hedge == cb[["hedge"]] & ca$dur == cb[["dur"]] & ca$as == cb[["as"]] & ca$buf == cb[["buf"]] & ca$pay == cb[["pay"]], ]
   ex <- mean(vapply(ep, function(k) mean(runs[[k]][[lv]][[o]][, "roe"]), 0))
@@ -329,11 +364,12 @@ guard(verify$feasible_exact[verify$key == key(fc)] && verify$eve_exact[verify$ke
 setting_labels <- function(cb) c(
   hedge_ratio = hedge_set$ratio[cb[["hedge"]]], hedge_tenor = hedge_set$tenor[cb[["hedge"]]],
   duration = names(dur_set)[cb[["dur"]]], asset_swap = names(as_set)[cb[["as"]]],
-  buffer = names(buf_set)[cb[["buf"]]], payout = names(pay_set)[cb[["pay"]]])
+  buffer = names(buf_set)[cb[["buf"]]], payout = names(pay_set)[cb[["pay"]]],
+  if ("carry" %in% names(cb)) c(carry = names(carry_set)[cb[["carry"]]]))
 ## each lever's contribution to the change in ROE, episode by episode (the
 ## surrogate's terms), and what the exact run adds through interactions
 contrib <- function(cb, rs) {
-  cm <- vapply(names(levers), function(lv) ep_mean(D[[lv]]$roe[cb[[lv]], , drop = FALSE])[1, ], numeric(K))
+  cm <- vapply(names(cb), function(lv) ep_mean(D[[lv]]$roe[cb[[lv]], , drop = FALSE])[1, ], numeric(K))
   ex <- vapply(ep, function(k) mean(rs[[k]]$quarterly$roe), 0) - plan_ep
   data.frame(episode = ep, cm, interaction = ex - rowSums(cm), total = ex, check.names = FALSE)
 }
@@ -350,7 +386,8 @@ by_regime <- function(ct) {
               `Growth 1% or more` = d$growth == "1% or more", `A contraction` = d$contraction,
               `No contraction` = !d$contraction)
   do.call(rbind, lapply(names(grp), function(g) { z <- d[grp[[g]], ]
-    data.frame(regime = g, n = nrow(z), as.list(colMeans(z[, c(names(levers), "interaction", "total")])), check.names = FALSE) }))
+    data.frame(regime = g, n = nrow(z), as.list(colMeans(z[, intersect(c(names(levers), "interaction", "total"), names(z))])),
+               check.names = FALSE) }))
 }
 regime_c <- by_regime(ct_c); regime_s <- by_regime(ct_s)
 ## the central portfolio in the scenarios, exactly, against the plan
@@ -417,6 +454,125 @@ oos <- do.call(rbind, lapply(list(c("first", "last"), c("last", "first")), funct
                cet1_test = on_te$cet1_min, eve_test = on_te$eve_max, stringsAsFactors = FALSE)
   }))
 }))
+## ---- 7. using the balance sheet itself: repo-funded carry ------------------------------------------
+## The five levers above only rearrange the balance sheet. The carry book adds
+## to it: asset-swapped 5-year government bonds held outside the buffer,
+## encumbered in repo. It uses neither the HQLA buffer nor the EVE budget;
+## what it uses is balance-sheet size (the leverage ratio) and credit-spread
+## risk, which the five-lever optimiser never had to ration.
+lr_floor <- 0.05
+key2 <- function(d) paste(d$hedge, d$dur, d$as, d$buf, d$pay, d$carry)
+cx <- cand_all[cand_all$half == "all", ]
+cx$ok_ext <- cx$ok_base & cx$lev_min >= lr_floor
+## the surrogate reproduces each carry setting's own run
+carry_err <- vapply(seq_len(nl[["carry"]]), function(o) {
+  cb <- plan_opt; cb[["carry"]] <- o
+  z <- cx[key2(cx) == paste(cb, collapse = " "), ]
+  ex <- mean(vapply(ep, function(k) mean(runs[[k]]$carry[[o]][, "roe"]), 0))
+  ex_c <- min(vapply(ep, function(k) min(runs[[k]]$carry[[o]][, "cet1fv"]), 0))
+  max(abs(z$roe - ex), abs(z$cet1_min - ex_c)) }, 0)
+guard(max(carry_err) < 1e-9, "the surrogate does not reproduce a carry setting's own run")
+## the central portfolio, without carry, in the extended grid: its leverage
+## ratio and its credit-spread risk
+c0 <- cx[key2(cx) == paste(c(cen, carry = 1L), collapse = " "), ]
+guard(nrow(c0) == 1 && abs(c0$roe - fc$roe) < 1e-12 && c0$ok_ext, "the central portfolio is not a feasible point of the extended grid")
+csr0 <- c0$csrbb_max
+## the best combination at the central EVE budget for a range of spread
+## budgets: no more spread risk than the central portfolio already takes,
+## then one to four points of CET1 more, then none at all
+pick2 <- function(d, B, S, static = FALSE) {
+  z <- d[d$ok_ext & d$eve_max <= B + 1e-12 & d$csrbb_max <= S + 1e-12 & (!static | !d$rules), ]
+  if (!nrow(z)) return(NULL)
+  z[which.max(z$roe), ]
+}
+s_steps <- c(0, 0.01, 0.02, 0.03, 0.04, Inf)
+sfront <- do.call(rbind, lapply(s_steps, function(st) cbind(spread_step = st, spread_budget = csr0 + st, pick2(cx, b_central, csr0 + st))))
+efront <- do.call(rbind, lapply(budgets, function(B) cbind(budget = B, pick2(cx, B, Inf))))
+guard(nrow(sfront) == length(s_steps) && nrow(efront) == length(budgets), "an extended budget has no admissible combination")
+guard(all(diff(sfront$roe) >= -1e-12) && all(sfront$roe >= fc$roe - 1e-12) && all(efront$roe >= frontier$roe[!frontier$static_only] - 1e-12),
+      "the carry book cannot lower the best ROE at any budget")
+## every choice run exactly
+cols6 <- c("hedge", "dur", "as", "buf", "pay", "carry")
+chosen2 <- unique(rbind(sfront[, cols6], efront[, cols6]))
+exact2 <- lapply(seq_len(nrow(chosen2)), function(i) {
+  cb <- unlist(chosen2[i, ])
+  lapply(stats::setNames(paths, paths), function(k) combo_run(inp_all[[k]], rp_all[[k]], cb))
+})
+names(exact2) <- key2(chosen2)
+exact_stats2 <- function(rs, S = seq_len(K)) {
+  e <- exact_stats(rs, S)
+  qq <- lapply(ep[S], function(k) qx(rs[[k]]))
+  c(e, lev_min = min(vapply(qq, function(x) min(x[, "cet1amt"] / x[, "expo"]), 0)),
+    csrbb_max = max(vapply(qq, function(x) max(100 * x[, "spv01"] * (1 - ea$tax) / x[, "cet1amt"]), 0)))
+}
+verify2 <- do.call(rbind, lapply(seq_len(nrow(chosen2)), function(i) {
+  s <- cx[key2(cx) == key2(chosen2[i, ]), ]; e <- exact_stats2(exact2[[i]])
+  data.frame(key = key2(chosen2[i, ]), t(setting_labels(unlist(chosen2[i, ]))),
+             roe_sur = s$roe, roe_exact = e[["roe"]], p5_exact = e[["roe_p5"]], win_exact = e[["win"]],
+             nii_exact = e[["nii"]], cet1_exact = e[["cet1_min"]], lcr_exact = e[["lcr_min"]], nsfr_exact = e[["nsfr_min"]],
+             eve_exact = e[["eve_max"]], lev_sur = s$lev_min, lev_exact = e[["lev_min"]],
+             csrbb_sur = s$csrbb_max, csrbb_exact = e[["csrbb_max"]], stringsAsFactors = FALSE, check.names = FALSE)
+}))
+verify2$roe_err <- verify2$roe_exact - verify2$roe_sur
+verify2$feasible_exact <- verify2$p5_exact >= plan_stats$all[["p5"]] - 1e-9 & verify2$cet1_exact >= CFG$cet1_min &
+  verify2$lcr_exact >= CFG$lcr_min & verify2$nsfr_exact >= nsfr_floor & verify2$lev_exact >= lr_floor
+print(verify2[, c("key", "roe_sur", "roe_exact", "roe_err", "cet1_exact", "lev_exact", "csrbb_exact", "eve_exact")])
+guard(max(abs(verify2$roe_err)) < 0.0005 && all(verify2$feasible_exact), "an extended choice misses its exact run or a limit")
+## what the carry book adds, with and without a spread budget, and where it
+## comes from across the macro regimes
+ext_cb <- function(z) unlist(z[, cols6])
+ext_unb <- sfront[is.infinite(sfront$spread_step), ]
+ext_tab <- do.call(rbind, lapply(seq_len(nrow(sfront)), function(i) { z <- sfront[i, ]; v <- verify2[verify2$key == key2(z), ]
+  data.frame(spread_step = z$spread_step, spread_budget = z$spread_budget, t(setting_labels(ext_cb(z))),
+             d_roe = v$roe_exact - plan_stats$all[["roe"]], d_roe_vs_central = v$roe_exact - verify$roe_exact[verify$key == key(fc)],
+             d_p5 = v$p5_exact - plan_stats$all[["p5"]], cet1_min = v$cet1_exact, lev_min = v$lev_exact,
+             csrbb = v$csrbb_exact, eve = v$eve_exact, nii = v$nii_exact, stringsAsFactors = FALSE, check.names = FALSE) }))
+## the named scenarios as well: the stagflationary downside is the one path
+## here with a sovereign shock (the bond-swap spread widens to its highest),
+## which the replayed history holds little of
+scen_lim <- function(rs) {
+  qq <- lapply(sc_paths, function(k) qx(rs[[k]]))
+  c(cet1 = min(vapply(qq, function(x) min(x[, "cet1fv"]), 0)), lev = min(vapply(qq, function(x) min(x[, "cet1amt"] / x[, "expo"]), 0)),
+    cet1_downside = min(qx(rs$downside)[, "cet1fv"]))
+}
+sl <- t(vapply(seq_len(nrow(sfront)), function(i) scen_lim(exact2[[key2(sfront[i, ])]]), numeric(3)))
+ext_tab$cet1_scen_min <- sl[, "cet1"]; ext_tab$cet1_downside <- sl[, "cet1_downside"]; ext_tab$lev_scen_min <- sl[, "lev"]
+ext_tab$ok_scen <- ext_tab$cet1_scen_min >= CFG$cet1_min & ext_tab$lev_scen_min >= lr_floor
+guard(ext_tab$ok_scen[1], "the central portfolio breaks a limit in a named scenario")
+## the largest carry book that keeps every limit in every episode and every
+## scenario
+ext_rec <- ext_tab[max(which(ext_tab$ok_scen & is.finite(ext_tab$spread_step))), ]
+## per R25bn of carry book, at the central portfolio (the slope across the
+## spread frontier's static steps)
+st <- ext_tab[is.finite(ext_tab$spread_step), ]
+per25 <- c(roe = unname(stats::coef(stats::lm(st$d_roe ~ st$spread_step))[2]) * 0.01,
+           csrbb = unname(stats::coef(stats::lm(st$csrbb ~ st$spread_step))[2]) * 0.01,
+           nii = unname(stats::coef(stats::lm(st$nii ~ st$spread_step))[2]) * 0.01,
+           cet1_downside = unname(stats::coef(stats::lm(st$cet1_downside ~ st$spread_step))[2]) * 0.01)
+rs_x <- exact2[[key2(ext_unb)]]
+ct_x <- contrib(ext_cb(ext_unb), rs_x); regime_x <- by_regime(ct_x)
+scen_x <- do.call(rbind, lapply(sc_paths, function(k) {
+  q0 <- runs[[k]]$plan; qc <- qx(rs_c[[k]]); qe <- qx(rs_x[[k]])
+  data.frame(scenario = k, roe_plan = mean(q0[, "roe"]), roe_central = mean(qc[, "roe"]), roe_carry = mean(qe[, "roe"]),
+             nii_plan = sum(q0[, "nii"]), nii_carry = sum(qe[, "nii"]), ni_plan = sum(q0[, "ni"]), ni_carry = sum(qe[, "ni"]),
+             cet1_central = min(qc[, "cet1fv"]), cet1_carry = min(qe[, "cet1fv"]),
+             lev_carry = min(qe[, "cet1amt"] / qe[, "expo"]), stringsAsFactors = FALSE)
+}))
+## the carry book on its own: its carry over repo funding at the jump-off,
+## per year, and what a 100 bp widening costs it
+cb_size <- carry_set[[ext_unb$carry]]
+carry_jo <- if (is.numeric(cb_size)) jo_mk$bs + (inp_all$baseline$rates$float3m[1] - (inp_all$baseline$rates$repo[1] + repo_sp)) else NA_real_
+## out of sample: the same split, for the unbudgeted extension
+oos2 <- do.call(rbind, lapply(list(c("first", "last"), c("last", "first")), function(pr_) {
+  tr <- cand_all[cand_all$half == pr_[1], ]; te <- cand_all[cand_all$half == pr_[2], ]
+  tr$ok_ext <- tr$ok_base & tr$lev_min >= lr_floor; te$ok_ext <- te$ok_base & te$lev_min >= lr_floor
+  ch <- pick2(tr, b_central, Inf); best <- pick2(te, b_central, Inf); on_te <- te[key2(te) == key2(ch), ]
+  data.frame(train = pr_[1], test = pr_[2], choice = key2(ch), roe_train = ch$roe - plan_stats[[pr_[1]]][["roe"]],
+             roe_test = on_te$roe - plan_stats[[pr_[2]]][["roe"]], roe_test_best = best$roe - plan_stats[[pr_[2]]][["roe"]],
+             feasible_test = on_te$ok_ext & on_te$eve_max <= b_central + 1e-12, stringsAsFactors = FALSE)
+}))
+binds2 <- c(leverage = mean(cx$lev_min < lr_floor), cet1 = mean(cx$cet1_min < CFG$cet1_min))
+
 t_all <- as.numeric(difftime(Sys.time(), t_start, units = "mins"))
 
 saveRDS(list(levers = list(ratio = names(ratio_set), tenor = names(tenor_set), duration = names(dur_set),
@@ -430,6 +586,12 @@ saveRDS(list(levers = list(ratio = names(ratio_set), tenor = names(tenor_set), d
              contrib = list(all = ct_c, static = ct_s), regime = list(all = regime_c, static = regime_s), regimes = reg,
              scenarios = scen_tab, settings_path = settings_path, oos = oos, limits_used = limits_used, variants = var_tab,
              limits = c(cet1 = CFG$cet1_min, lcr = CFG$lcr_min, nsfr = nsfr_floor, hq_cap = hq_cap),
+             carry = list(set = names(carry_set), sizes = unlist(carry_set[sapply(carry_set, is.numeric)]), lr_floor = lr_floor,
+                          repo_spread = repo_sp, carry_jo = carry_jo, central_lev = c0$lev_min, central_csrbb = csr0,
+                          n_combos = nrow(cx), n_feasible = sum(cx$ok_ext), binds = binds2,
+                          spread_frontier = ext_tab, eve_frontier = efront, verify = verify2, recommended = ext_rec, per_step = per25,
+                          contrib = ct_x, regime = regime_x, scenarios = scen_x, oos = oos2,
+                          single_err = max(carry_err), n_runs = n_runs_carry),
              minutes = c(runs = t_runs, enumeration = t_enum, total = t_all)),
         out_path("risk_budget.rds"))
 ngfb_log("risk budget: %d combinations (%d feasible) from %d runs per path on %d paths in %.1f min; at %.0f%% of CET1 EVE: %s %+.0f bps (static only %+.0f bps)",

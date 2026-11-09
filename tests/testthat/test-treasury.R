@@ -110,6 +110,35 @@ test_that("an asset swap earns the bond-swap spread and marks only to the spread
   expect_equal(books_overlay(z$rates$date, list())$nii, rep(0, 8))
 })
 
+test_that("a book funded in repo outside the buffer carries over its funding and adds exposure, not HQLA", {
+  bs <- tb_bs(); z <- tb_inputs(n = 6)
+  z$rates$float3m <- z$rates$jibar
+  jo <- list(gov10y = 10, float3m = z$rates$float3m[1], bs = 0.6, gov5y = 9)
+  fund <- z$rates$repo + 0.1
+  sp <- 0.6 + c(0, 0.2, 0.4, 0.4, 0.4, 0.4)
+  rb <- bond_book(rep(0.25, 6), 400, z$rates, jo, type = "asset_swap", tax = 0, spread = sp, funding = fund, in_hqla = FALSE)
+  expect_false(rb$in_hqla)
+  expect_equal(rb$carry, 100 * (0.6 + z$rates$float3m - fund) / 400)
+  ov <- books_overlay(z$rates$date, list(rb))
+  expect_equal(ov$hqla_mtm, rep(0, 6)); expect_equal(ov$exposure, rep(100, 6)); expect_equal(ov$rsf, rep(5, 6))
+  ## the same book inside the buffer moves the HQLA stock and adds no exposure
+  hb <- bond_book(rep(0.25, 6), 400, z$rates, jo, type = "asset_swap", tax = 0, spread = sp)
+  ov2 <- books_overlay(z$rates$date, list(hb))
+  expect_equal(ov2$hqla_mtm, hb$mtm); expect_equal(ov2$exposure, rep(0, 6)); expect_equal(ov2$rsf, rep(0, 6))
+  ## in the engine the leverage exposure and the NSFR move; the LCR moves only
+  ## through the carry's retained earnings, not through the bonds
+  r0 <- run_engine(bs, z$growth, z$rates, z$credit, z$ratios)
+  r1 <- run_engine(bs, z$growth, z$rates, z$credit, z$ratios, overlay = ov)
+  r1b <- run_engine(bs, z$growth, z$rates, z$credit, z$ratios, overlay = ov[, c("date", "nii", "gains")])
+  expect_equal(r1$quarterly$lcr, r1b$quarterly$lcr)
+  expect_equal(r1b$quarterly$exposure, r1b$quarterly$total_assets)
+  expect_equal(r1$quarterly$exposure, r1$quarterly$total_assets + 100)
+  expect_equal(r1$quarterly$leverage, 0.88 * r1$quarterly$equity / r1$quarterly$exposure)
+  liq1 <- liquidity_ratios(r1$balances[, 2], bs)
+  expect_equal(r1$quarterly$nsfr[1], liq1[["asf"]] / (liq1[["rsf"]] + 5))
+  expect_equal(r0$quarterly$exposure, r0$quarterly$total_assets)
+})
+
 test_that("the bond-swap spread takes a share of the long bond's non-policy move", {
   z <- tb_inputs(n = 4)
   z$rates$float3m <- c(7.35, 6.35, 5.35, 5.35)                       # the benchmark falls two points

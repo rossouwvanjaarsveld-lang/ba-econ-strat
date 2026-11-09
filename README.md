@@ -41,7 +41,8 @@ relationships intact when they are carried down to an individual bank.
 | `data-raw/` | `00_pull_data.bat` / `01_pull_data.R` download everything (run on your own machine); `02_pull_supplement.R` tops up later additions; `03_pull_monthly.bat` / `03_pull_monthly.R` add the months between quarter ends to BA900 (and the monthly sector balance sheet, BA100); `04_pull_swaps.bat` / `04_pull_swaps.R` download daily ZAR swap rates, JIBAR, ZARONIA and generic government yields from rbond.co.za (CC BY 4.0) into `data-raw/rbond/` |
 | `analysis/` | thin, ordered scripts `00_config.R` … `15_risk_budget.R` and `run_all.R`, each writing one `output/*.rds`; `lab_tools.R` holds the strategies the lab and the optimiser share |
 | `output/` | `panels.rds`, `stage1.rds`, `stage2.rds`, `ngfb.rds`, `scenarios.rds`, `optimise.rds`, `backtest.rds`, `model_checks.rds`, `monthly.rds`, `dynamics.rds`, `strategy.rds`, `performance.rds`, `audit.rds`, `levers.rds`, `lab.rds`, `risk_budget.rds` |
-| `report/` | the Quarto write-up (`ngfb_macro_strategy.qmd`, rendered to a self-contained `ngfb_macro_strategy.html`); every number in it is computed inline from `output/*.rds` |
+| `report/` | the Quarto write-ups, each rendered to a self-contained HTML file: `ngfb_macro_strategy_full.qmd`, the complete edition (every model, test, table and figure, plus every explanation from the blog posts); `ngfb_macro_strategy_web.qmd`, the public edition built from it by `report/make_web_edition.py` (no industry-model internals, no peer-group membership, code hidden: publish its HTML, never its .qmd, which still reads everything); and `ngfb_macro_strategy.qmd`, the v0.6.1 report they extend; every number is computed inline from `output/*.rds` (the complete edition also reads the blog snapshot below) |
+| `blog/` | the website posts: `build_post_snapshot.R` writes `blog/ngfb-macro-strategy/post_artefacts.rds` (results and public market data only, nothing from the industry models' internals). `blog/ngfb-macro-strategy/` is the Hugo page bundle of the short post, *The Tide and the Swimming* (`index.qmd`, the rendered `index.md` and figures, `post_inputs.R`, `references.bib`, `thumbnail.png`), to copy into the site's `content/posts/`; `blog/ngfb-macro-strategy-long/` keeps the long version, *Sixty Histories and a Risk Budget*, with its own copy of the snapshot |
 | `inst/artefacts/` | committed NGFB artefacts (canonical deposit composition and the full NGFB identity, `ngfb_canonical.rds`) |
 | `tests/testthat/` | unit tests: parsing, satellite search and both forms of the intercept correction, model checks (Clark-West, bounds test, asymmetric decomposition, peer-group roster), pooling, engine, liquidity, attribution in ROE and net income, scenarios and optimiser (including the aggressiveness analysis), Kalman-filter disaggregation (against the closed-form GLS solution), monthly drivers, dynamic multipliers (against the ARDL formula), polynomial lags, shrinkage, local projections, share positioning, scorecards and product economics |
 
@@ -59,8 +60,17 @@ source("data-raw/04_pull_swaps.R")        # ZAR swap curve (rbond.co.za), a few 
 install.packages(".", repos = NULL, type = "source")      # or devtools::install()
 source("analysis/run_all.R")                               # writes output/*.rds
 
-# 3. the write-up
-quarto::quarto_render("report/ngfb_macro_strategy.qmd")    # or: quarto render report/...
+# 3. the snapshot shared by the posts and the complete edition
+source("blog/build_post_snapshot.R")                       # writes blog/ngfb-macro-strategy/post_artefacts.rds
+#    (copy it into blog/ngfb-macro-strategy-long/ too if you re-render the long post)
+
+# 4. the write-ups
+quarto::quarto_render("report/ngfb_macro_strategy_full.qmd")   # the complete edition
+quarto::quarto_render("report/ngfb_macro_strategy_web.qmd")    # the public edition (publish the HTML only)
+quarto::quarto_render("report/ngfb_macro_strategy.qmd")        # the v0.6.1 report
+
+# 5. the website posts (Hugo page bundles), with a UTF-8 locale
+# in blog/ngfb-macro-strategy/ (and blog/ngfb-macro-strategy-long/): quarto render index.qmd --to hugo-md
 ```
 
 Dependencies: base R (`stats`, `utils`), with `jsonlite`, `xml2` and `curl` for
@@ -180,5 +190,7 @@ back-test from 2019Q4 and 2021Q4 (`analysis/08_model_checks.R`).
   fair value, the LCR at market value, the NSFR and the change in EVE; a
   surrogate built from single-setting engine runs (equity rolled forward with
   each combination's payout) is checked against exact runs, and the choice is
-  tested out of sample on two halves of the episodes
-  (`analysis/15_risk_budget.R`).
+  tested out of sample on two halves of the episodes. A sixth lever uses the
+  size of the balance sheet itself: asset-swapped government bonds funded in
+  repo outside the buffer, under a leverage-ratio floor, the CET1 floor in the
+  named scenarios and a credit-spread measure (`analysis/15_risk_budget.R`).

@@ -4,18 +4,25 @@
 \alias{books_overlay}
 \title{The engine overlay for a set of bond books}
 \usage{
-books_overlay(dates, books)
+books_overlay(dates, books, rsf_encumbered = 0.05)
 }
 \arguments{
 \item{dates}{Quarter dates of the run.}
 
 \item{books}{List of [bond_book()] results (may be empty).}
+
+\item{rsf_encumbered}{Required-stable-funding factor of a book held
+outside the buffer.}
 }
 \value{
-Data frame `date`, `nii`, `gains`, `hqla_mtm`.
+Data frame `date`, `nii`, `gains`, `hqla_mtm`, `exposure`, `rsf`.
 }
 \description{
 Sums the books' carry (NII), realised gains (profit or loss) and
-mark-to-market (the buffer's market value, for the LCR) quarter by
-quarter, in the form [run_engine()]'s `overlay` takes.
+mark-to-market quarter by quarter, in the form [run_engine()]'s `overlay`
+takes. Only books inside the buffer move the HQLA stock at market value;
+books held outside it, encumbered in repo, add their holding to the
+leverage exposure and the Basel factor for encumbered Level 1 assets to
+required stable funding (encumbered for less than six months: the same as
+unencumbered, 5%).
 }
